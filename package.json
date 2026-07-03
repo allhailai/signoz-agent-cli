@@ -1,0 +1,48 @@
+{
+  "name": "signoz-agent-cli",
+  "version": "0.1.0",
+  "description": "Agent-first CLI for investigating SigNoz traces and logs.",
+  "type": "module",
+  "bin": {
+    "signoz-agent": "./dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && chmod +x dist/cli.js",
+    "dev": "tsx src/cli.ts",
+    "format:check": "prettier --check .",
+    "lint": "eslint .",
+    "test": "npm run build && vitest run",
+    "type-check": "tsc --noEmit"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aviatorcare/signoz-agent-cli.git"
+  },
+  "keywords": [
+    "signoz",
+    "observability",
+    "cli"
+  ],
+  "author": "",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/aviatorcare/signoz-agent-cli/issues"
+  },
+  "homepage": "https://github.com/aviatorcare/signoz-agent-cli#readme",
+  "dependencies": {
+    "commander": "^15.0.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^26.1.0",
+    "eslint": "^10.6.0",
+    "prettier": "^3.9.4",
+    "tsx": "^4.23.0",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.62.1",
+    "vitest": "^4.1.9"
+  }
+}
