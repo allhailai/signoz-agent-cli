@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 import { Command } from "commander";
 
 import { registerDoctorCommand } from "./commands/doctor.js";
+import { registerTracesSearchCommand } from "./commands/tracesSearch.js";
 
 const version = "0.1.0";
 
@@ -15,6 +16,7 @@ export function createProgram(): Command {
     .showHelpAfterError();
 
   registerDoctorCommand(program);
+  registerTracesSearchCommand(program);
 
   return program;
 }
