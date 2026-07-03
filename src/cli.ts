@@ -3,14 +3,20 @@ import { pathToFileURL } from "node:url";
 
 import { Command } from "commander";
 
+import { registerDoctorCommand } from "./commands/doctor.js";
+
 const version = "0.1.0";
 
 export function createProgram(): Command {
-  return new Command()
+  const program = new Command()
     .name("signoz-agent")
     .description("Agent-first CLI for investigating SigNoz traces and logs.")
     .version(version)
     .showHelpAfterError();
+
+  registerDoctorCommand(program);
+
+  return program;
 }
 
 if (
