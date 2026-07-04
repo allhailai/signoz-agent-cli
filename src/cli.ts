@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { pathToFileURL } from "node:url";
+import { realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 import { Command } from "commander";
 
@@ -23,10 +24,7 @@ export function createProgram(): Command {
   return program;
 }
 
-if (
-  process.argv[1] !== undefined &&
-  import.meta.url === pathToFileURL(process.argv[1]).href
-) {
+if (isMainModule()) {
   const program = createProgram();
 
   if (process.argv.length <= 2) {
@@ -34,4 +32,15 @@ if (
   }
 
   program.parse(process.argv);
+}
+
+function isMainModule(): boolean {
+  if (process.argv[1] === undefined) {
+    return false;
+  }
+
+  return (
+    realpathSync(process.argv[1]) ===
+    realpathSync(fileURLToPath(import.meta.url))
+  );
 }

@@ -1,4 +1,6 @@
 import { execFile } from "node:child_process";
+import { mkdtemp, symlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
@@ -24,6 +26,18 @@ describe("signoz-agent CLI", () => {
     const cliPath = join(process.cwd(), "dist", "cli.js");
 
     const { stdout } = await execFileAsync(process.execPath, [cliPath]);
+
+    expect(stdout).toContain("Usage: signoz-agent");
+  });
+
+  it("prints help when invoked through an npm-style symlink", async () => {
+    const cliPath = join(process.cwd(), "dist", "cli.js");
+    const tempDir = await mkdtemp(join(tmpdir(), "signoz-agent-bin-"));
+    const binPath = join(tempDir, "signoz-agent");
+
+    await symlink(cliPath, binPath);
+
+    const { stdout } = await execFileAsync(binPath, ["--help"]);
 
     expect(stdout).toContain("Usage: signoz-agent");
   });
