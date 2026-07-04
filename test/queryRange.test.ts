@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildFailedTracesSearchQueryRange,
+  buildTraceInspectQueryRange,
   buildTraceLogsQueryRange,
   epochMillisWindowSince,
   parseRelativeDuration,
@@ -137,6 +138,23 @@ describe("query_range builders", () => {
     expect(builderQuery.limit).toBe(3);
     expect(builderQuery.offset).toBe(0);
     expect(builderQuery.filter.expression).toBe("trace_id = 'abc123'");
+  });
+
+  it("builds raw trace inspect payloads by trace ID", () => {
+    const payload = buildTraceInspectQueryRange({
+      traceId: "trace-abc",
+      since: "2h",
+      limit: 5,
+      now: 1_700_000_000_000,
+    });
+    const builderQuery = getOnlyBuilderQuery(payload);
+
+    expect(payload.start).toBe(1_699_992_800_000);
+    expect(payload.requestType).toBe("raw");
+    expect(builderQuery.signal).toBe("traces");
+    expect(builderQuery.source).toBe(signozTracesSource);
+    expect(builderQuery.limit).toBe(5);
+    expect(builderQuery.filter.expression).toBe("trace_id = 'trace-abc'");
   });
 });
 

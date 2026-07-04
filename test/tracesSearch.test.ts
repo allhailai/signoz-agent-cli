@@ -46,7 +46,7 @@ describe("traces search command", () => {
       expect(result.exitCode).toBe(0);
       expect(result.stderr).toBe("");
       expect(result.stdout).toContain(
-        "0 failing traces for service=barry since=30m\n",
+        "0 matching traces for service=barry since=30m\n",
       );
       expect(result.stdout).toContain(
         "- widen --since or relax --status/--route filters\n",
@@ -68,7 +68,7 @@ describe("traces search command", () => {
       expect(result.exitCode).toBe(0);
       expect(result.stderr).toBe("");
       expect(result.stdout).toContain(
-        "0 failing traces for service=barry since=30m\n",
+        "0 matching traces for service=barry since=30m\n",
       );
       await expect(readSession(result.cwd)).resolves.toMatchObject({
         version: 1,
@@ -112,7 +112,7 @@ describe("traces search command", () => {
         expect(result.exitCode).toBe(0);
         expect(result.stderr).toBe("");
         expect(result.stdout).toContain(
-          "1 failing trace for service=barry route=/webhooks/signoz since=30m",
+          "1 matching trace for service=barry route=/webhooks/signoz since=30m",
         );
         expect(result.stdout).toContain(
           "@t1 401 POST /webhooks/signoz 12ms trace=abcdef123456...",

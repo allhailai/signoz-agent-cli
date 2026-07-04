@@ -56,6 +56,8 @@ export type TraceLogsQueryOptions = {
   now?: number;
 };
 
+export type TraceInspectQueryOptions = TraceLogsQueryOptions;
+
 const defaultSince = "30m";
 const defaultLimit = 20;
 const queryName = "A";
@@ -131,6 +133,23 @@ export function buildTraceLogsQueryRange(
 
   return buildQueryRangePayload({
     signal: "logs",
+    filterExpression: equalsStringExpression(
+      filterKeys.traceId,
+      options.traceId,
+    ),
+    timeRange,
+    limit: options.limit,
+  });
+}
+
+export function buildTraceInspectQueryRange(
+  options: TraceInspectQueryOptions,
+): QueryRangePayload {
+  const timeRange = epochMillisWindowSince(options.since, options.now);
+
+  return buildQueryRangePayload({
+    signal: "traces",
+    source: signozTracesSource,
     filterExpression: equalsStringExpression(
       filterKeys.traceId,
       options.traceId,

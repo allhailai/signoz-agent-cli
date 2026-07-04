@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import type { ParsedTraceRow } from "../signoz/traceRows.js";
@@ -14,11 +14,22 @@ export type TraceRefRecord = {
   timestamp?: string;
 };
 
-type SessionFile = {
+export type SessionFile = {
   version: 1;
   updatedAt: string;
   traces: TraceRefRecord[];
 };
+
+export type ResolveTraceRefResult =
+  | {
+      ok: true;
+      traceId: string;
+      ref?: TraceRefRecord;
+    }
+  | {
+      ok: false;
+      ref: string;
+    };
 
 const sessionDirectory = ".signoz-agent";
 const sessionFileName = "session.json";
@@ -44,6 +55,66 @@ export async function writeTraceRefs(
   );
 
   return traces;
+}
+
+export async function resolveTraceIdOrRef(
+  traceIdOrRef: string,
+  cwd: string = process.cwd(),
+): Promise<ResolveTraceRefResult> {
+  if (!traceIdOrRef.startsWith("@")) {
+    return {
+      ok: true,
+      traceId: traceIdOrRef,
+    };
+  }
+
+  const session = await readSessionFile(cwd);
+  const ref = session?.traces.find((trace) => trace.ref === traceIdOrRef);
+
+  if (ref === undefined) {
+    return {
+      ok: false,
+      ref: traceIdOrRef,
+    };
+  }
+
+  return {
+    ok: true,
+    traceId: ref.traceId,
+    ref,
+  };
+}
+
+async function readSessionFile(cwd: string): Promise<SessionFile | undefined> {
+  let text: string;
+
+  try {
+    text = await readFile(join(cwd, sessionDirectory, sessionFileName), "utf8");
+  } catch {
+    return undefined;
+  }
+
+  try {
+    const parsed = JSON.parse(text) as unknown;
+
+    if (!isSessionFile(parsed)) {
+      return undefined;
+    }
+
+    return parsed;
+  } catch {
+    return undefined;
+  }
+}
+
+function isSessionFile(value: unknown): value is SessionFile {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+
+  const record = value as Record<string, unknown>;
+
+  return record.version === 1 && Array.isArray(record.traces);
 }
 
 function toTraceRefRecord(

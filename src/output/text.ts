@@ -1,4 +1,6 @@
 import type { TraceRefRecord } from "../session/refStore.js";
+import type { ParsedLogRow } from "../signoz/logRows.js";
+import type { ParsedTraceRow } from "../signoz/traceRows.js";
 
 export type TraceSearchTextOptions = {
   serviceName: string;
@@ -31,12 +33,110 @@ export function formatTraceSearchText(
   return `${lines.join("\n")}\n`;
 }
 
+export function formatTraceInspectText(
+  traceId: string,
+  spans: ParsedTraceRow[],
+): string {
+  const summary = summarizeTrace(traceId, spans);
+  const lines = [
+    `trace ${shortTraceId(traceId)} spans=${spans.length} status=${summary.status} method=${summary.method} route=${summary.route} duration=${summary.duration}`,
+  ];
+
+  if (summary.rootSpan !== undefined) {
+    lines.push(`root ${formatSpanSummary(summary.rootSpan)}`);
+  }
+
+  if (spans.length > 0) {
+    lines.push("", "Spans:");
+
+    for (const span of spans.slice(0, 10)) {
+      lines.push(`- ${formatSpanSummary(span)}`);
+    }
+
+    if (spans.length > 10) {
+      lines.push(`- ... ${spans.length - 10} more`);
+    }
+  }
+
+  return `${lines.join("\n")}\n`;
+}
+
+export function formatTraceLogsText(
+  traceId: string,
+  logs: ParsedLogRow[],
+): string {
+  const lines = [`${logs.length} logs for trace=${shortTraceId(traceId)}`];
+
+  for (const log of logs) {
+    const timestamp = log.timestamp ?? "time=?";
+    const level = log.level ?? "level=?";
+    const message = log.message ?? "message=?";
+
+    lines.push(`${timestamp} ${level} ${message}`);
+  }
+
+  return `${lines.join("\n")}\n`;
+}
+
+function summarizeTrace(
+  traceId: string,
+  spans: ParsedTraceRow[],
+): {
+  traceId: string;
+  spanCount: number;
+  rootSpan?: ParsedTraceRow;
+  status: string;
+  method: string;
+  route: string;
+  duration: string;
+} {
+  const rootSpan = findRootSpan(spans);
+  const firstSpan = rootSpan ?? spans[0];
+
+  return {
+    traceId,
+    spanCount: spans.length,
+    ...(rootSpan === undefined ? {} : { rootSpan }),
+    status: formatStatus(firstSpan),
+    method: firstSpan?.method ?? "?",
+    route: firstSpan?.route ?? "?",
+    duration:
+      firstSpan?.durationMs === undefined ? "?" : `${firstSpan.durationMs}ms`,
+  };
+}
+
+function findRootSpan(spans: ParsedTraceRow[]): ParsedTraceRow | undefined {
+  return spans.find(
+    (span) =>
+      span.parentSpanId === undefined ||
+      span.parentSpanId === "" ||
+      span.parentSpanId === "0000000000000000",
+  );
+}
+
+function formatSpanSummary(span: ParsedTraceRow): string {
+  const name = span.spanName ?? "span=?";
+  const service = span.serviceName ?? "service=?";
+  const duration =
+    span.durationMs === undefined ? "duration=?" : `${span.durationMs}ms`;
+
+  return `${duration} ${formatStatus(span)} ${service} ${name}`;
+}
+
+function formatStatus(span: ParsedTraceRow | undefined): string {
+  if (span?.statusCode !== undefined) {
+    return span.statusCode.toString();
+  }
+
+  return span?.status ?? "?";
+}
+
 function formatTraceSearchHeader(
   count: number,
   options: TraceSearchTextOptions,
 ): string {
   const parts = [
-    `${count} failing ${count === 1 ? "trace" : "traces"}`,
+    `${count} matching ${count === 1 ? "trace" : "traces"}`,
     `for service=${options.serviceName}`,
   ];
 

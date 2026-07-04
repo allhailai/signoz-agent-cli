@@ -1,9 +1,12 @@
 export type ParsedTraceRow = {
   traceId: string;
+  spanId?: string;
+  parentSpanId?: string;
   serviceName?: string;
   method?: string;
   route?: string;
   statusCode?: number;
+  status?: string;
   durationMs?: number;
   spanName?: string;
   timestamp?: string;
@@ -120,11 +123,32 @@ function parseTraceRow(row: unknown): ParsedTraceRow[] {
     data?.statusCode,
     data?.status_code,
   ]);
+  const status = firstString([
+    record.status,
+    record.statusCodeString,
+    record.status_code_string,
+    data?.status,
+    data?.statusCodeString,
+    data?.status_code_string,
+    attributes.status,
+  ]);
   const durationNano = firstNumber([
     record.duration_nano,
     record.durationNano,
     data?.duration_nano,
     data?.durationNano,
+  ]);
+  const spanId = firstString([
+    record.spanId,
+    record.span_id,
+    data?.spanId,
+    data?.span_id,
+  ]);
+  const parentSpanId = firstString([
+    record.parentSpanId,
+    record.parent_span_id,
+    data?.parentSpanId,
+    data?.parent_span_id,
   ]);
   const spanName = firstString([record.name, record.spanName, data?.name]);
   const timestamp = firstString([
@@ -150,8 +174,20 @@ function parseTraceRow(row: unknown): ParsedTraceRow[] {
     parsed.statusCode = statusCode;
   }
 
+  if (status !== undefined) {
+    parsed.status = status;
+  }
+
   if (durationNano !== undefined) {
     parsed.durationMs = Math.round(durationNano / 1_000_000);
+  }
+
+  if (spanId !== undefined) {
+    parsed.spanId = spanId;
+  }
+
+  if (parentSpanId !== undefined) {
+    parsed.parentSpanId = parentSpanId;
   }
 
   if (spanName !== undefined) {
