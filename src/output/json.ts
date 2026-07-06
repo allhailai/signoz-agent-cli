@@ -1,5 +1,6 @@
 import type { TraceRefRecord } from "../session/refStore.js";
 import type { ParsedLogRow } from "../signoz/logRows.js";
+import type { ServiceSummary } from "../signoz/serviceRows.js";
 import type { ParsedTraceRow } from "../signoz/traceRows.js";
 
 export type TraceSearchJsonOptions = {
@@ -16,6 +17,18 @@ export type TraceSearchJsonResult = {
   count: number;
   query: TraceSearchJsonOptions;
   traces: TraceSearchJsonTrace[];
+};
+
+export type ServicesListJsonOptions = {
+  since: string;
+  limit: number;
+};
+
+export type ServicesListJsonResult = {
+  ok: true;
+  count: number;
+  query: ServicesListJsonOptions;
+  services: ServiceSummary[];
 };
 
 type TraceSearchJsonTrace = TraceRefRecord & {
@@ -65,6 +78,20 @@ export function formatTraceSearchJson(
     count: traces.length,
     query: options,
     traces,
+  };
+
+  return `${JSON.stringify(result)}\n`;
+}
+
+export function formatServicesListJson(
+  services: ServiceSummary[],
+  options: ServicesListJsonOptions,
+): string {
+  const result: ServicesListJsonResult = {
+    ok: true,
+    count: services.length,
+    query: options,
+    services,
   };
 
   return `${JSON.stringify(result)}\n`;

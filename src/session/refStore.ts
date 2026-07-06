@@ -18,6 +18,7 @@ export type SessionFile = {
   version: 1;
   updatedAt: string;
   traces: TraceRefRecord[];
+  currentService?: string;
 };
 
 export type ResolveTraceRefResult =
@@ -40,21 +41,44 @@ export async function writeTraceRefs(
   now: Date = new Date(),
 ): Promise<TraceRefRecord[]> {
   const traces = rows.map((row, index) => toTraceRefRecord(row, index + 1));
+  const existingSession = await readSessionFile(cwd);
   const session: SessionFile = {
     version: 1,
     updatedAt: now.toISOString(),
     traces,
   };
-  const directory = join(cwd, sessionDirectory);
 
-  await mkdir(directory, { recursive: true });
-  await writeFile(
-    join(directory, sessionFileName),
-    `${JSON.stringify(session, null, 2)}\n`,
-    "utf8",
-  );
+  if (existingSession?.currentService !== undefined) {
+    session.currentService = existingSession.currentService;
+  }
+
+  await writeSessionFile(session, cwd);
 
   return traces;
+}
+
+export async function writeSelectedService(
+  serviceName: string,
+  cwd: string = process.cwd(),
+  now: Date = new Date(),
+): Promise<void> {
+  const existingSession = await readSessionFile(cwd);
+  const session: SessionFile = {
+    version: 1,
+    updatedAt: now.toISOString(),
+    traces: existingSession?.traces ?? [],
+    currentService: serviceName,
+  };
+
+  await writeSessionFile(session, cwd);
+}
+
+export async function readSelectedService(
+  cwd: string = process.cwd(),
+): Promise<string | undefined> {
+  const session = await readSessionFile(cwd);
+
+  return session?.currentService;
 }
 
 export async function resolveTraceIdOrRef(
@@ -105,6 +129,20 @@ async function readSessionFile(cwd: string): Promise<SessionFile | undefined> {
   } catch {
     return undefined;
   }
+}
+
+async function writeSessionFile(
+  session: SessionFile,
+  cwd: string,
+): Promise<void> {
+  const directory = join(cwd, sessionDirectory);
+
+  await mkdir(directory, { recursive: true });
+  await writeFile(
+    join(directory, sessionFileName),
+    `${JSON.stringify(session, null, 2)}\n`,
+    "utf8",
+  );
 }
 
 function isSessionFile(value: unknown): value is SessionFile {

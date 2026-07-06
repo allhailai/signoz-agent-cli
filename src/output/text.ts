@@ -1,5 +1,6 @@
 import type { TraceRefRecord } from "../session/refStore.js";
 import type { ParsedLogRow } from "../signoz/logRows.js";
+import type { ServiceSummary } from "../signoz/serviceRows.js";
 import type { ParsedTraceRow } from "../signoz/traceRows.js";
 
 export type TraceSearchTextOptions = {
@@ -7,6 +8,10 @@ export type TraceSearchTextOptions = {
   route?: string;
   since: string;
   jsonCommand: string;
+};
+
+export type ServicesListTextOptions = {
+  since: string;
 };
 
 export function formatTraceSearchText(
@@ -76,6 +81,38 @@ export function formatTraceLogsText(
   }
 
   return `${lines.join("\n")}\n`;
+}
+
+export function formatServicesListText(
+  services: ServiceSummary[],
+  options: ServicesListTextOptions,
+): string {
+  const lines = [
+    `${services.length} ${services.length === 1 ? "service" : "services"} since=${options.since}`,
+    "",
+  ];
+
+  for (const service of services) {
+    lines.push(formatServiceLine(service));
+  }
+
+  const firstService = services[0];
+
+  if (firstService !== undefined) {
+    lines.push("", "Next:");
+    lines.push(
+      `- signoz-agent services select ${shellToken(firstService.serviceName)}`,
+    );
+  } else {
+    lines.push("Next:");
+    lines.push("- widen --since");
+  }
+
+  return `${lines.join("\n")}\n`;
+}
+
+export function formatSelectedServiceText(serviceName: string): string {
+  return `${serviceName}\n`;
 }
 
 function summarizeTrace(
@@ -157,6 +194,23 @@ function formatTraceLine(trace: TraceRefRecord): string {
     trace.durationMs === undefined ? "?ms" : `${trace.durationMs}ms`;
 
   return `${trace.ref} ${status} ${method} ${route} ${duration} trace=${shortTraceId(trace.traceId)}`;
+}
+
+function formatServiceLine(service: ServiceSummary): string {
+  const latest =
+    service.latestTimestamp === undefined
+      ? "latest=?"
+      : `latest=${service.latestTimestamp}`;
+
+  return `${service.serviceName} traces=${service.traceCount} errors=${service.errorCount} ${latest}`;
+}
+
+function shellToken(value: string): string {
+  if (/^[A-Za-z0-9_./:@-]+$/.test(value)) {
+    return value;
+  }
+
+  return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
 function shortTraceId(traceId: string): string {
