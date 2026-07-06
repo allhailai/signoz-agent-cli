@@ -2,6 +2,7 @@ import { Command, InvalidArgumentError } from "commander";
 
 import { ConfigError, loadConfig } from "../config.js";
 import { formatTraceInspectJson, formatTraceLogsJson } from "../output/json.js";
+import { formatRawQueryRangeDiagnostic } from "../output/raw.js";
 import { formatTraceInspectText, formatTraceLogsText } from "../output/text.js";
 import { resolveTraceIdOrRef } from "../session/refStore.js";
 import {
@@ -21,6 +22,7 @@ type TraceLookupOptions = {
   since: string;
   limit: number;
   json?: boolean;
+  raw?: boolean;
 };
 
 type TraceFailure = {
@@ -28,6 +30,7 @@ type TraceFailure = {
   command: "inspect" | "logs";
   code:
     | "missing_ref"
+    | "invalid_options"
     | "missing_config"
     | "invalid_config"
     | "unreachable"
@@ -55,11 +58,12 @@ export function registerTraceCommand(program: Command): void {
     .option("--since <duration>", "Relative time window.", defaultSince)
     .option("--limit <n>", "Maximum spans to return.", parseLimit, defaultLimit)
     .option("--json", "Print structured JSON output.")
+    .option("--raw", "Print raw query_range diagnostics.")
     .action(async (traceIdOrRef: string, options: TraceLookupOptions) => {
       const result = await runTraceInspect(traceIdOrRef, options);
 
       if (!result.ok) {
-        writeFailure(result, options.json === true);
+        writeFailure(result, options.json === true && options.raw !== true);
         process.exitCode = 1;
       }
     });
@@ -76,11 +80,12 @@ export function registerTraceCommand(program: Command): void {
       defaultLimit,
     )
     .option("--json", "Print structured JSON output.")
+    .option("--raw", "Print raw query_range diagnostics.")
     .action(async (traceIdOrRef: string, options: TraceLookupOptions) => {
       const result = await runTraceLogs(traceIdOrRef, options);
 
       if (!result.ok) {
-        writeFailure(result, options.json === true);
+        writeFailure(result, options.json === true && options.raw !== true);
         process.exitCode = 1;
       }
     });
@@ -91,6 +96,13 @@ async function runTraceInspect(
   options: TraceLookupOptions,
 ): Promise<{ ok: true } | TraceFailure> {
   try {
+    if (options.json === true && options.raw === true) {
+      return invalidOptionsFailure(
+        "inspect",
+        "Cannot combine --json and --raw",
+      );
+    }
+
     const resolved = await resolveTraceIdOrRef(traceIdOrRef);
 
     if (!resolved.ok) {
@@ -99,14 +111,24 @@ async function runTraceInspect(
 
     const config = loadConfig();
     const client = new SigNozClient(config);
-    const response = await client.postJson(
-      queryRangeEndpoint,
-      buildTraceInspectQueryRange({
-        traceId: resolved.traceId,
-        since: options.since,
-        limit: options.limit,
-      }),
-    );
+    const requestPayload = buildTraceInspectQueryRange({
+      traceId: resolved.traceId,
+      since: options.since,
+      limit: options.limit,
+    });
+    const response = await client.postJson(queryRangeEndpoint, requestPayload);
+
+    if (options.raw === true) {
+      process.stdout.write(
+        formatRawQueryRangeDiagnostic({
+          command: "trace inspect",
+          endpoint: queryRangeEndpoint,
+          request: requestPayload,
+          response,
+        }),
+      );
+      return { ok: true };
+    }
 
     if (!response.ok) {
       return signozFailure("inspect", response);
@@ -143,6 +165,10 @@ async function runTraceLogs(
   options: TraceLookupOptions,
 ): Promise<{ ok: true } | TraceFailure> {
   try {
+    if (options.json === true && options.raw === true) {
+      return invalidOptionsFailure("logs", "Cannot combine --json and --raw");
+    }
+
     const resolved = await resolveTraceIdOrRef(traceIdOrRef);
 
     if (!resolved.ok) {
@@ -151,14 +177,24 @@ async function runTraceLogs(
 
     const config = loadConfig();
     const client = new SigNozClient(config);
-    const response = await client.postJson(
-      queryRangeEndpoint,
-      buildTraceLogsQueryRange({
-        traceId: resolved.traceId,
-        since: options.since,
-        limit: options.limit,
-      }),
-    );
+    const requestPayload = buildTraceLogsQueryRange({
+      traceId: resolved.traceId,
+      since: options.since,
+      limit: options.limit,
+    });
+    const response = await client.postJson(queryRangeEndpoint, requestPayload);
+
+    if (options.raw === true) {
+      process.stdout.write(
+        formatRawQueryRangeDiagnostic({
+          command: "trace logs",
+          endpoint: queryRangeEndpoint,
+          request: requestPayload,
+          response,
+        }),
+      );
+      return { ok: true };
+    }
 
     if (!response.ok) {
       return signozFailure("logs", response);
@@ -210,6 +246,18 @@ function missingRefFailure(
     code: "missing_ref",
     message: `${ref} is not in .signoz-agent/session.json; rerun signoz-agent traces search or pass a full trace ID`,
     ref,
+  };
+}
+
+function invalidOptionsFailure(
+  command: TraceFailure["command"],
+  message: string,
+): TraceFailure {
+  return {
+    ok: false,
+    command,
+    code: "invalid_options",
+    message,
   };
 }
 
@@ -298,6 +346,8 @@ function formatFailure(result: TraceFailure): string {
   switch (result.code) {
     case "missing_ref":
       return `error trace ref ${result.ref ?? "unknown"} not found; rerun signoz-agent traces search or pass a full trace ID`;
+    case "invalid_options":
+      return `error ${result.message}`;
     case "missing_config":
       return `error missing ${formatMissingVariables(result.missingVariables)}`;
     case "invalid_config":

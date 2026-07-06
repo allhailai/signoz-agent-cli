@@ -1,11 +1,13 @@
-import type { TraceRefRecord } from "../session/refStore.js";
+import type { LogRefRecord, TraceRefRecord } from "../session/refStore.js";
 import type { ParsedLogRow } from "../signoz/logRows.js";
+import type { ServiceSummary } from "../signoz/serviceRows.js";
 import type { ParsedTraceRow } from "../signoz/traceRows.js";
 
 export type TraceSearchJsonOptions = {
-  serviceName: string;
+  filterExpression?: string;
+  serviceName?: string;
   route?: string;
-  statusExpression: string;
+  statusExpression?: string;
   minDurationMs?: number;
   since: string;
   limit: number;
@@ -16,6 +18,35 @@ export type TraceSearchJsonResult = {
   count: number;
   query: TraceSearchJsonOptions;
   traces: TraceSearchJsonTrace[];
+};
+
+export type ServicesListJsonOptions = {
+  since: string;
+  limit: number;
+};
+
+export type ServicesListJsonResult = {
+  ok: true;
+  count: number;
+  query: ServicesListJsonOptions;
+  services: ServiceSummary[];
+};
+
+export type LogsSearchJsonOptions = {
+  filterExpression?: string;
+  serviceName?: string;
+  contains?: string;
+  traceId?: string;
+  since: string;
+  limit: number;
+};
+
+export type LogsSearchJsonResult = {
+  ok: true;
+  count: number;
+  query: LogsSearchJsonOptions;
+  refs: LogRefRecord[];
+  logs: ParsedLogRow[];
 };
 
 type TraceSearchJsonTrace = TraceRefRecord & {
@@ -65,6 +96,36 @@ export function formatTraceSearchJson(
     count: traces.length,
     query: options,
     traces,
+  };
+
+  return `${JSON.stringify(result)}\n`;
+}
+
+export function formatLogsSearchJson(
+  logs: ParsedLogRow[],
+  refs: LogRefRecord[],
+  options: LogsSearchJsonOptions,
+): string {
+  const result: LogsSearchJsonResult = {
+    ok: true,
+    count: logs.length,
+    query: options,
+    refs,
+    logs,
+  };
+
+  return `${JSON.stringify(result)}\n`;
+}
+
+export function formatServicesListJson(
+  services: ServiceSummary[],
+  options: ServicesListJsonOptions,
+): string {
+  const result: ServicesListJsonResult = {
+    ok: true,
+    count: services.length,
+    query: options,
+    services,
   };
 
   return `${JSON.stringify(result)}\n`;

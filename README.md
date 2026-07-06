@@ -1,6 +1,6 @@
 # signoz-agent-cli
 
-Agent-first CLI for investigating SigNoz traces and correlated logs.
+Agent-first CLI for discovering SigNoz services, selecting a service, and searching traces/logs.
 
 ## Setup
 
@@ -15,7 +15,7 @@ For local development, run commands through the TypeScript entrypoint:
 
 ```bash
 npm run dev -- doctor
-npm run dev -- traces search --service barry --route "/webhooks/signoz" --status ">=400" --since 30m
+npm run dev -- services list --since 2h
 ```
 
 To try the compiled command locally:
@@ -33,7 +33,7 @@ The CLI reads SigNoz connection settings from environment variables:
 - `SIGNOZ_API_URL`: SigNoz API base URL.
 - `SIGNOZ_API_KEY`: SigNoz API key.
 
-Use a local `.env` file or shell exports for development, but do not commit secrets. This repo ignores `.env` and `.env.*` files by default.
+Use a local `.env` file or shell exports for development, but do not print or commit secrets. This repo ignores `.env` and `.env.*` files by default. Confirm env vars are present without exposing their values.
 
 Example shell setup with placeholders:
 
@@ -50,27 +50,39 @@ Run `doctor` first to verify configuration, authentication, and API reachability
 signoz-agent doctor
 ```
 
-Search failing traces and create session-local refs such as `@t1`:
+Primary Control Tower API workflow: discover recent services, select the API service, then search traces and logs without repeating `--service`:
 
 ```bash
-signoz-agent traces search --service barry --route "/webhooks/signoz" --status ">=400" --since 30m
+signoz-agent services list --since 2h
+signoz-agent services select control-tower-api
+signoz-agent traces search --since 30m
+signoz-agent logs search --contains "timeout" --since 30m
 ```
 
-Inspect spans for a trace ID or session ref:
+Trace searches create session-local refs such as `@t1`; log searches create refs such as `@l1`. Inspect spans or fetch correlated logs with a trace ID or trace ref:
 
 ```bash
 signoz-agent trace inspect @t1
-```
-
-Find correlated logs for a trace ID or session ref:
-
-```bash
 signoz-agent trace logs @t1
 ```
 
-Add `--json` to any command when an agent or script needs structured output.
+Use direct SigNoz filter expressions when the relevant attribute is known:
 
-## Barry Workflow
+```bash
+signoz-agent traces search --filter "barry.agent_run_id = '4'" --since 2h
+signoz-agent logs search --filter "barry.agent_run_id = '4'" --since 2h
+```
+
+Use log body search for snippets, task IDs, or messages:
+
+```bash
+signoz-agent logs search --contains "hello world" --since 2h
+signoz-agent logs search --contains "8dbe9558fe874905a8458d3ac068ed60" --raw
+```
+
+Add `--json` when an agent or script needs parsed output. Add `--raw` when debugging SigNoz query construction; it prints the request payload and compact response shape, not parsed rows.
+
+## Secondary Workflows
 
 Use this flow when debugging Barry webhook failures in SigNoz:
 
@@ -81,7 +93,15 @@ signoz-agent trace inspect @t1
 signoz-agent trace logs @t1
 ```
 
-If the search returns multiple refs, inspect the trace with the clearest failure signal first, then fetch logs for the same ref. If a ref is missing, rerun `traces search` or pass a full trace ID.
+For Barry/OpenCode smoke work, attribute and body searches can find logs that are not trace-correlated:
+
+```bash
+signoz-agent traces search --filter "barry.agent_run_id = '4'" --since 2h
+signoz-agent logs search --filter "barry.agent_run_id = '4'" --since 2h
+signoz-agent logs search --contains "hello world" --since 2h
+```
+
+If a ref is missing, rerun the search that created it or pass the full trace ID.
 
 ## Validation
 

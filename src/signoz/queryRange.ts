@@ -40,10 +40,21 @@ export type SigNozBuilderQuerySpec = {
 };
 
 export type TraceSearchQueryOptions = {
-  serviceName: string;
+  serviceName?: string;
+  filterExpression?: string;
   route?: string;
   statusExpression?: string;
   minDurationMs?: number;
+  since?: string;
+  limit?: number;
+  now?: number;
+};
+
+export type LogsSearchQueryOptions = {
+  filterExpression?: string;
+  serviceName?: string;
+  contains?: string;
+  traceId?: string;
   since?: string;
   limit?: number;
   now?: number;
@@ -57,6 +68,21 @@ export type TraceLogsQueryOptions = {
 };
 
 export type TraceInspectQueryOptions = TraceLogsQueryOptions;
+
+export type ServicesListQueryOptions = {
+  since?: string;
+  limit?: number;
+  now?: number;
+};
+
+export type RawQueryRangeOptions = {
+  signal: QueryRangeSignal;
+  source?: string | undefined;
+  filterExpression: string;
+  since?: string | undefined;
+  limit?: number | undefined;
+  now?: number | undefined;
+};
 
 const defaultSince = "30m";
 const defaultLimit = 20;
@@ -98,13 +124,26 @@ export function epochMillisWindowSince(
 export function buildFailedTracesSearchQueryRange(
   options: TraceSearchQueryOptions,
 ): QueryRangePayload {
-  const timeRange = epochMillisWindowSince(options.since, options.now);
-  const expressions: string[] = [
-    equalsStringExpression(filterKeys.serviceName, options.serviceName),
-  ];
+  return buildTracesSearchQueryRange(options);
+}
+
+export function buildTracesSearchQueryRange(
+  options: TraceSearchQueryOptions,
+): QueryRangePayload {
+  const expressions: string[] = [];
+
+  if (options.filterExpression !== undefined) {
+    expressions.push(options.filterExpression);
+  }
+
+  if (options.serviceName !== undefined) {
+    expressions.push(
+      safeEqualityExpression(filterKeys.serviceName, options.serviceName),
+    );
+  }
 
   if (options.route !== undefined) {
-    expressions.push(equalsStringExpression(filterKeys.route, options.route));
+    expressions.push(safeEqualityExpression(filterKeys.route, options.route));
   }
 
   if (options.statusExpression !== undefined) {
@@ -117,46 +156,114 @@ export function buildFailedTracesSearchQueryRange(
     );
   }
 
-  return buildQueryRangePayload({
+  return buildRawQueryRange({
     signal: "traces",
     source: signozTracesSource,
     filterExpression: andExpression(expressions),
-    timeRange,
+    since: options.since,
     limit: options.limit,
+    now: options.now,
   });
 }
 
 export function buildTraceLogsQueryRange(
   options: TraceLogsQueryOptions,
 ): QueryRangePayload {
-  const timeRange = epochMillisWindowSince(options.since, options.now);
-
-  return buildQueryRangePayload({
+  return buildRawQueryRange({
     signal: "logs",
-    filterExpression: equalsStringExpression(
+    filterExpression: safeEqualityExpression(
       filterKeys.traceId,
       options.traceId,
     ),
-    timeRange,
+    since: options.since,
     limit: options.limit,
+    now: options.now,
+  });
+}
+
+export function buildLogsSearchQueryRange(
+  options: LogsSearchQueryOptions,
+): QueryRangePayload {
+  const expressions: string[] = [];
+
+  if (options.filterExpression !== undefined) {
+    expressions.push(options.filterExpression);
+  }
+
+  if (options.serviceName !== undefined) {
+    expressions.push(
+      safeEqualityExpression(filterKeys.serviceName, options.serviceName),
+    );
+  }
+
+  if (options.contains !== undefined) {
+    expressions.push(logBodyContainsExpression(options.contains));
+  }
+
+  if (options.traceId !== undefined) {
+    expressions.push(
+      safeEqualityExpression(filterKeys.traceId, options.traceId),
+    );
+  }
+
+  return buildRawQueryRange({
+    signal: "logs",
+    filterExpression: andExpression(expressions),
+    since: options.since,
+    limit: options.limit,
+    now: options.now,
   });
 }
 
 export function buildTraceInspectQueryRange(
   options: TraceInspectQueryOptions,
 ): QueryRangePayload {
-  const timeRange = epochMillisWindowSince(options.since, options.now);
-
-  return buildQueryRangePayload({
+  return buildRawQueryRange({
     signal: "traces",
     source: signozTracesSource,
-    filterExpression: equalsStringExpression(
+    filterExpression: safeEqualityExpression(
       filterKeys.traceId,
       options.traceId,
     ),
+    since: options.since,
+    limit: options.limit,
+    now: options.now,
+  });
+}
+
+export function buildServicesListQueryRange(
+  options: ServicesListQueryOptions = {},
+): QueryRangePayload {
+  return buildRawQueryRange({
+    signal: "traces",
+    source: signozTracesSource,
+    filterExpression: "",
+    since: options.since,
+    limit: options.limit,
+    now: options.now,
+  });
+}
+
+export function buildRawQueryRange(
+  options: RawQueryRangeOptions,
+): QueryRangePayload {
+  const timeRange = epochMillisWindowSince(options.since, options.now);
+
+  return buildQueryRangePayload({
+    signal: options.signal,
+    filterExpression: options.filterExpression,
     timeRange,
     limit: options.limit,
+    ...(options.source === undefined ? {} : { source: options.source }),
   });
+}
+
+export function safeEqualityExpression(key: string, value: string): string {
+  return `${key} = '${escapeFilterString(value)}'`;
+}
+
+export function logBodyContainsExpression(value: string): string {
+  return `body contains '${escapeFilterString(value)}'`;
 }
 
 function buildQueryRangePayload(options: {
@@ -208,10 +315,6 @@ function parseStatusExpression(expression: string): string {
   const value = Number(match[2]);
 
   return `${filterKeys.httpStatusCode} ${operator} ${value}`;
-}
-
-function equalsStringExpression(key: string, value: string): string {
-  return `${key} = '${escapeFilterString(value)}'`;
 }
 
 function andExpression(expressions: string[]): string {

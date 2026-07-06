@@ -1,44 +1,41 @@
 import { Command, InvalidArgumentError } from "commander";
 
 import { ConfigError, loadConfig } from "../config.js";
-import { formatTraceSearchJson } from "../output/json.js";
+import { formatLogsSearchJson } from "../output/json.js";
 import { formatRawQueryRangeDiagnostic } from "../output/raw.js";
-import { formatTraceSearchText } from "../output/text.js";
-import { readSelectedService, writeTraceRefs } from "../session/refStore.js";
+import { formatLogsSearchText } from "../output/text.js";
+import { readSelectedService, writeLogRefs } from "../session/refStore.js";
 import {
   SigNozClient,
   SigNozNetworkError,
   type SigNozResponse,
 } from "../signoz/client.js";
 import {
-  buildTracesSearchQueryRange,
+  buildLogsSearchQueryRange,
   queryRangeEndpoint,
 } from "../signoz/queryRange.js";
-import { parseRawTraceRows } from "../signoz/traceRows.js";
+import { parseRawLogRows } from "../signoz/logRows.js";
 
-type TracesSearchOptions = {
+type LogsSearchOptions = {
   filter?: string;
-  service?: string;
-  route?: string;
-  status?: string;
-  minDuration?: number;
+  contains?: string;
+  traceId?: string;
   since: string;
   limit: number;
   json?: boolean;
   raw?: boolean;
 };
 
-type ResolvedTraceSearchOptions = {
+type ResolvedLogsSearchOptions = {
   filterExpression?: string;
   serviceName?: string;
-  route?: string;
-  statusExpression?: string;
-  minDurationMs?: number;
+  contains?: string;
+  traceId?: string;
   since: string;
   limit: number;
 };
 
-type TraceSearchFailure = {
+type LogsSearchFailure = {
   ok: false;
   code:
     | "missing_selection"
@@ -57,23 +54,21 @@ type TraceSearchFailure = {
 const defaultSince = "30m";
 const defaultLimit = 20;
 
-export function registerTracesSearchCommand(program: Command): void {
-  const traces = program.command("traces").description("Search SigNoz traces.");
+export function registerLogsSearchCommand(program: Command): void {
+  const logs = program.command("logs").description("Search SigNoz logs.");
 
-  traces
+  logs
     .command("search")
-    .description("Search traces and assign session-local refs.")
-    .option("--filter <expr>", "Direct SigNoz trace filter expression.")
-    .option("--service <name>", "Service name to search.")
-    .option("--route <route>", "HTTP route to match.")
-    .option("--status <expr>", "HTTP status expression to match.")
-    .option("--min-duration <ms>", "Minimum duration in milliseconds.", parseMs)
+    .description("Search logs and assign session-local refs.")
+    .option("--filter <expr>", "Direct SigNoz log filter expression.")
+    .option("--contains <text>", "Text to search for in log body/message.")
+    .option("--trace-id <id>", "Trace ID to search correlated logs for.")
     .option("--since <duration>", "Relative time window.", defaultSince)
     .option("--limit <n>", "Maximum rows to return.", parseLimit, defaultLimit)
     .option("--json", "Print structured JSON output.")
     .option("--raw", "Print raw query_range diagnostics.")
-    .action(async (options: TracesSearchOptions) => {
-      const result = await runTracesSearch(options);
+    .action(async (options: LogsSearchOptions) => {
+      const result = await runLogsSearch(options);
 
       if (!result.ok) {
         writeFailure(result, options.json === true && options.raw !== true);
@@ -82,9 +77,9 @@ export function registerTracesSearchCommand(program: Command): void {
     });
 }
 
-async function runTracesSearch(
-  options: TracesSearchOptions,
-): Promise<{ ok: true } | TraceSearchFailure> {
+async function runLogsSearch(
+  options: LogsSearchOptions,
+): Promise<{ ok: true } | LogsSearchFailure> {
   try {
     if (options.json === true && options.raw === true) {
       return {
@@ -94,7 +89,7 @@ async function runTracesSearch(
       };
     }
 
-    const resolvedOptions = await resolveTraceSearchOptions(options);
+    const resolvedOptions = await resolveLogsSearchOptions(options);
 
     if (!resolvedOptions.ok) {
       return resolvedOptions;
@@ -102,13 +97,13 @@ async function runTracesSearch(
 
     const config = loadConfig();
     const client = new SigNozClient(config);
-    const requestPayload = buildTracesSearchQueryRange(resolvedOptions.options);
+    const requestPayload = buildLogsSearchQueryRange(resolvedOptions.options);
     const response = await client.postJson(queryRangeEndpoint, requestPayload);
 
     if (options.raw === true) {
       process.stdout.write(
         formatRawQueryRangeDiagnostic({
-          command: "traces search",
+          command: "logs search",
           endpoint: queryRangeEndpoint,
           request: requestPayload,
           response,
@@ -121,7 +116,7 @@ async function runTracesSearch(
       return signozFailure(response);
     }
 
-    const parsed = parseRawTraceRows(response.bodyJson);
+    const parsed = parseRawLogRows(response.bodyJson);
 
     if (!parsed.ok) {
       return {
@@ -133,39 +128,38 @@ async function runTracesSearch(
       };
     }
 
-    const refs = await writeTraceRefs(parsed.rows);
+    const refs = await writeLogRefs(parsed.rows);
 
     if (options.json === true) {
       process.stdout.write(
-        formatTraceSearchJson(parsed.rows, refs, resolvedOptions.options),
+        formatLogsSearchJson(parsed.rows, refs, resolvedOptions.options),
       );
       return { ok: true };
     }
 
     process.stdout.write(
-      formatTraceSearchText(
+      formatLogsSearchText(
         refs,
-        traceSearchTextOptions(resolvedOptions.options),
+        logsSearchTextOptions(resolvedOptions.options),
       ),
     );
 
     return { ok: true };
   } catch (error) {
-    return traceSearchFailureFromError(error);
+    return logsSearchFailureFromError(error);
   }
 }
 
-async function resolveTraceSearchOptions(
-  options: TracesSearchOptions,
+async function resolveLogsSearchOptions(
+  options: LogsSearchOptions,
 ): Promise<
-  { ok: true; options: ResolvedTraceSearchOptions } | TraceSearchFailure
+  { ok: true; options: ResolvedLogsSearchOptions } | LogsSearchFailure
 > {
-  if (options.filter !== undefined && hasStructuredTraceFilters(options)) {
+  if (countExplicitSelectors(options) > 1) {
     return {
       ok: false,
       code: "invalid_options",
-      message:
-        "Cannot combine --filter with --service, --route, --status, or --min-duration",
+      message: "Cannot combine --filter, --contains, or --trace-id",
     };
   }
 
@@ -180,7 +174,29 @@ async function resolveTraceSearchOptions(
     };
   }
 
-  const serviceName = options.service ?? (await readSelectedService());
+  if (options.contains !== undefined) {
+    return {
+      ok: true,
+      options: {
+        contains: options.contains,
+        since: options.since,
+        limit: options.limit,
+      },
+    };
+  }
+
+  if (options.traceId !== undefined) {
+    return {
+      ok: true,
+      options: {
+        traceId: options.traceId,
+        since: options.since,
+        limit: options.limit,
+      },
+    };
+  }
+
+  const serviceName = await readSelectedService();
 
   if (serviceName === undefined) {
     return {
@@ -196,55 +212,39 @@ async function resolveTraceSearchOptions(
       serviceName,
       since: options.since,
       limit: options.limit,
-      ...(options.route === undefined ? {} : { route: options.route }),
-      ...(options.status === undefined
-        ? {}
-        : { statusExpression: options.status }),
-      ...(options.minDuration === undefined
-        ? {}
-        : { minDurationMs: options.minDuration }),
     },
   };
 }
 
-function hasStructuredTraceFilters(options: TracesSearchOptions): boolean {
-  return (
-    options.service !== undefined ||
-    options.route !== undefined ||
-    options.status !== undefined ||
-    options.minDuration !== undefined
-  );
-}
-
-function parseMs(value: string): number {
-  return parsePositiveInteger(value, "Minimum duration");
+function countExplicitSelectors(options: LogsSearchOptions): number {
+  return [
+    options.filter !== undefined,
+    options.contains !== undefined,
+    options.traceId !== undefined,
+  ].filter(Boolean).length;
 }
 
 function parseLimit(value: string): number {
-  return parsePositiveInteger(value, "Limit");
-}
-
-function parsePositiveInteger(value: string, label: string): number {
   const parsed = Number(value);
 
   if (!Number.isInteger(parsed) || parsed < 1) {
-    throw new InvalidArgumentError(`${label} must be a positive integer`);
+    throw new InvalidArgumentError("Limit must be a positive integer");
   }
 
   return parsed;
 }
 
-function signozFailure(response: SigNozResponse): TraceSearchFailure {
+function signozFailure(response: SigNozResponse): LogsSearchFailure {
   return {
     ok: false,
     code: "signoz_error",
-    message: "SigNoz trace search failed",
+    message: "SigNoz logs search failed",
     endpoint: queryRangeEndpoint,
     httpStatus: response.status,
   };
 }
 
-function traceSearchFailureFromError(error: unknown): TraceSearchFailure {
+function logsSearchFailureFromError(error: unknown): LogsSearchFailure {
   if (error instanceof ConfigError) {
     return {
       ok: false,
@@ -275,12 +275,12 @@ function traceSearchFailureFromError(error: unknown): TraceSearchFailure {
   return {
     ok: false,
     code: "unexpected_response",
-    message: "Unable to search SigNoz traces",
+    message: "Unable to search SigNoz logs",
     endpoint: queryRangeEndpoint,
   };
 }
 
-function writeFailure(result: TraceSearchFailure, json: boolean): void {
+function writeFailure(result: LogsSearchFailure, json: boolean): void {
   if (json) {
     process.stderr.write(`${JSON.stringify(result)}\n`);
     return;
@@ -289,7 +289,7 @@ function writeFailure(result: TraceSearchFailure, json: boolean): void {
   process.stderr.write(`${formatFailure(result)}\n`);
 }
 
-function formatFailure(result: TraceSearchFailure): string {
+function formatFailure(result: LogsSearchFailure): string {
   switch (result.code) {
     case "missing_selection":
       return [
@@ -297,8 +297,8 @@ function formatFailure(result: TraceSearchFailure): string {
         "Next:",
         "- signoz-agent services list --since 2h",
         "- signoz-agent services select <service-name>",
-        "- signoz-agent traces search --service <service-name>",
-        '- signoz-agent traces search --filter "<expr>"',
+        '- signoz-agent logs search --filter "<expr>"',
+        '- signoz-agent logs search --contains "<text>"',
       ].join("\n");
     case "invalid_options":
       return `error ${result.message}`;
@@ -309,9 +309,9 @@ function formatFailure(result: TraceSearchFailure): string {
     case "unreachable":
       return "error signoz unreachable";
     case "signoz_error":
-      return `error signoz trace search failed status=${result.httpStatus}`;
+      return `error signoz logs search failed status=${result.httpStatus}`;
     case "unexpected_response":
-      return `error signoz trace search unexpected response: ${result.message}`;
+      return `error signoz logs search unexpected response: ${result.message}`;
     default: {
       const exhaustiveCheck: never = result.code;
       return exhaustiveCheck;
@@ -329,10 +329,11 @@ function formatMissingVariables(
   return missingVariables.join(",");
 }
 
-function traceSearchTextOptions(options: ResolvedTraceSearchOptions): {
-  serviceName?: string;
+function logsSearchTextOptions(options: ResolvedLogsSearchOptions): {
   filterExpression?: string;
-  route?: string;
+  serviceName?: string;
+  contains?: string;
+  traceId?: string;
   since: string;
   jsonCommand: string;
 } {
@@ -345,31 +346,24 @@ function traceSearchTextOptions(options: ResolvedTraceSearchOptions): {
     ...(options.serviceName === undefined
       ? {}
       : { serviceName: options.serviceName }),
-    ...(options.route === undefined ? {} : { route: options.route }),
+    ...(options.contains === undefined ? {} : { contains: options.contains }),
+    ...(options.traceId === undefined ? {} : { traceId: options.traceId }),
   };
 }
 
-function buildJsonCommand(options: ResolvedTraceSearchOptions): string {
-  const args = ["signoz-agent", "traces", "search"];
+function buildJsonCommand(options: ResolvedLogsSearchOptions): string {
+  const args = ["signoz-agent", "logs", "search"];
 
   if (options.filterExpression !== undefined) {
     args.push("--filter", shellToken(options.filterExpression));
   }
 
-  if (options.serviceName !== undefined) {
-    args.push("--service", shellToken(options.serviceName));
+  if (options.contains !== undefined) {
+    args.push("--contains", shellToken(options.contains));
   }
 
-  if (options.route !== undefined) {
-    args.push("--route", shellToken(options.route));
-  }
-
-  if (options.statusExpression !== undefined) {
-    args.push("--status", shellToken(options.statusExpression));
-  }
-
-  if (options.minDurationMs !== undefined) {
-    args.push("--min-duration", options.minDurationMs.toString());
+  if (options.traceId !== undefined) {
+    args.push("--trace-id", shellToken(options.traceId));
   }
 
   args.push("--since", shellToken(options.since));

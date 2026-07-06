@@ -1,6 +1,6 @@
 # Barry Debugging With SigNoz Agent
 
-Use this reference when the user asks for a Barry failure investigation backed by SigNoz traces and logs.
+Use this secondary reference when the user asks for a Barry failure investigation backed by SigNoz traces and logs. For general service discovery and selected-service search, start with the main skill or Control Tower reference.
 
 ## Ground Rules
 
@@ -8,7 +8,8 @@ Use this reference when the user asks for a Barry failure investigation backed b
 - Do not read, print, or commit `.env`; it is local and ignored.
 - Confirm `SIGNOZ_API_URL` and `SIGNOZ_API_KEY` are present without showing their values.
 - Prefer compact text output for interactive investigation. Use `--json` when the result will be parsed or summarized programmatically.
-- Only use implemented commands: `doctor`, `traces search`, `trace inspect`, and `trace logs`.
+- Use `--raw` only for query diagnostics when SigNoz results are surprising.
+- Use implemented commands only: `doctor`, `services list`, `services select`, `traces search`, `logs search`, `trace inspect`, and `trace logs`.
 
 ## Investigation Flow
 
@@ -36,6 +37,20 @@ Then fetch correlated logs for the same trace:
 
 ```bash
 signoz-agent trace logs @t1
+```
+
+If correlated logs are empty, search logs directly by known attributes or message text:
+
+```bash
+signoz-agent traces search --filter "barry.agent_run_id = '4'" --since 2h
+signoz-agent logs search --filter "barry.agent_run_id = '4'" --since 2h
+signoz-agent logs search --contains "hello world" --since 2h
+```
+
+`logs search` creates log refs such as `@l1` for reporting or follow-up. Use `--raw` for payload diagnostics:
+
+```bash
+signoz-agent logs search --contains "8dbe9558fe874905a8458d3ac068ed60" --raw
 ```
 
 ## Reporting Findings

@@ -2,11 +2,17 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildFailedTracesSearchQueryRange,
+  buildLogsSearchQueryRange,
+  buildRawQueryRange,
+  buildServicesListQueryRange,
   buildTraceInspectQueryRange,
   buildTraceLogsQueryRange,
+  buildTracesSearchQueryRange,
   epochMillisWindowSince,
+  logBodyContainsExpression,
   parseRelativeDuration,
   queryRangeEndpoint,
+  safeEqualityExpression,
   signozTracesSource,
   type QueryRangePayload,
   type SigNozBuilderQuerySpec,
@@ -90,6 +96,58 @@ describe("query_range builders", () => {
     expect(builderQuery.filter.expression).toBe("service.name = 'barry'");
   });
 
+  it("builds trace search payloads from arbitrary filters", () => {
+    const payload = buildTracesSearchQueryRange({
+      filterExpression: "barry.agent_run_id = '4'",
+      since: "2h",
+      limit: 11,
+      now: 1_700_000_000_000,
+    });
+    const builderQuery = getOnlyBuilderQuery(payload);
+
+    expect(payload.start).toBe(1_699_992_800_000);
+    expect(builderQuery.signal).toBe("traces");
+    expect(builderQuery.source).toBe(signozTracesSource);
+    expect(builderQuery.limit).toBe(11);
+    expect(builderQuery.filter.expression).toBe("barry.agent_run_id = '4'");
+  });
+
+  it("builds raw query_range payloads for reusable builders", () => {
+    const payload = buildRawQueryRange({
+      signal: "logs",
+      filterExpression: "service.name = 'barry'",
+      since: "15m",
+      limit: 9,
+      now: 1_700_000_000_000,
+    });
+    const builderQuery = getOnlyBuilderQuery(payload);
+
+    expect(payload).toMatchObject({
+      start: 1_699_999_100_000,
+      end: 1_700_000_000_000,
+      requestType: "raw",
+      compositeQuery: {
+        queries: [
+          {
+            type: "builder_query",
+            spec: {
+              name: "A",
+              signal: "logs",
+              disabled: false,
+              filter: {
+                expression: "service.name = 'barry'",
+              },
+              selectFields: [],
+              limit: 9,
+              offset: 0,
+            },
+          },
+        ],
+      },
+    });
+    expect(builderQuery).not.toHaveProperty("source");
+  });
+
   it("escapes single quotes in trace filter string values", () => {
     const payload = buildFailedTracesSearchQueryRange({
       serviceName: "barry's worker",
@@ -100,6 +158,62 @@ describe("query_range builders", () => {
 
     expect(builderQuery.filter.expression).toBe(
       "service.name = 'barry\\'s worker' AND http.route = '/webhooks/signoz\\'s-test'",
+    );
+  });
+
+  it("builds safe equality expressions", () => {
+    expect(safeEqualityExpression("service.name", "barry's worker")).toBe(
+      "service.name = 'barry\\'s worker'",
+    );
+  });
+
+  it("builds log body contains expressions", () => {
+    expect(logBodyContainsExpression("hello 'world'")).toBe(
+      "body contains 'hello \\'world\\''",
+    );
+  });
+
+  it("builds log search payloads from direct filters", () => {
+    const payload = buildLogsSearchQueryRange({
+      filterExpression: "barry.agent_run_id = '4'",
+      since: "2h",
+      limit: 11,
+      now: 1_700_000_000_000,
+    });
+    const builderQuery = getOnlyBuilderQuery(payload);
+
+    expect(payload.start).toBe(1_699_992_800_000);
+    expect(builderQuery.signal).toBe("logs");
+    expect(builderQuery).not.toHaveProperty("source");
+    expect(builderQuery.limit).toBe(11);
+    expect(builderQuery.filter.expression).toBe("barry.agent_run_id = '4'");
+  });
+
+  it("builds log search payloads from contains text", () => {
+    const payload = buildLogsSearchQueryRange({
+      contains: "hello world",
+      since: "2h",
+      limit: 11,
+      now: 1_700_000_000_000,
+    });
+    const builderQuery = getOnlyBuilderQuery(payload);
+
+    expect(builderQuery.signal).toBe("logs");
+    expect(builderQuery.filter.expression).toBe("body contains 'hello world'");
+  });
+
+  it("builds log search payloads from selected service", () => {
+    const payload = buildLogsSearchQueryRange({
+      serviceName: "control-tower-api",
+      since: "30m",
+      limit: 5,
+      now: 1_700_000_000_000,
+    });
+    const builderQuery = getOnlyBuilderQuery(payload);
+
+    expect(builderQuery.signal).toBe("logs");
+    expect(builderQuery.filter.expression).toBe(
+      "service.name = 'control-tower-api'",
     );
   });
 
@@ -155,6 +269,22 @@ describe("query_range builders", () => {
     expect(builderQuery.source).toBe(signozTracesSource);
     expect(builderQuery.limit).toBe(5);
     expect(builderQuery.filter.expression).toBe("trace_id = 'trace-abc'");
+  });
+
+  it("builds recent service discovery payloads from trace data", () => {
+    const payload = buildServicesListQueryRange({
+      since: "2h",
+      limit: 100,
+      now: 1_700_000_000_000,
+    });
+    const builderQuery = getOnlyBuilderQuery(payload);
+
+    expect(payload.start).toBe(1_699_992_800_000);
+    expect(payload.requestType).toBe("raw");
+    expect(builderQuery.signal).toBe("traces");
+    expect(builderQuery.source).toBe(signozTracesSource);
+    expect(builderQuery.limit).toBe(100);
+    expect(builderQuery.filter.expression).toBe("");
   });
 });
 

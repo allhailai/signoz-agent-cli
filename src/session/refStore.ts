@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
+import type { ParsedLogRow } from "../signoz/logRows.js";
 import type { ParsedTraceRow } from "../signoz/traceRows.js";
 
 export type TraceRefRecord = {
@@ -14,10 +15,21 @@ export type TraceRefRecord = {
   timestamp?: string;
 };
 
+export type LogRefRecord = {
+  ref: string;
+  timestamp?: string;
+  traceId?: string;
+  level?: string;
+  message?: string;
+  attributes: Record<string, unknown>;
+};
+
 export type SessionFile = {
   version: 1;
   updatedAt: string;
   traces: TraceRefRecord[];
+  logs: LogRefRecord[];
+  currentService?: string;
 };
 
 export type ResolveTraceRefResult =
@@ -40,21 +52,69 @@ export async function writeTraceRefs(
   now: Date = new Date(),
 ): Promise<TraceRefRecord[]> {
   const traces = rows.map((row, index) => toTraceRefRecord(row, index + 1));
+  const existingSession = await readSessionFile(cwd);
   const session: SessionFile = {
     version: 1,
     updatedAt: now.toISOString(),
     traces,
+    logs: existingSession?.logs ?? [],
   };
-  const directory = join(cwd, sessionDirectory);
 
-  await mkdir(directory, { recursive: true });
-  await writeFile(
-    join(directory, sessionFileName),
-    `${JSON.stringify(session, null, 2)}\n`,
-    "utf8",
-  );
+  if (existingSession?.currentService !== undefined) {
+    session.currentService = existingSession.currentService;
+  }
+
+  await writeSessionFile(session, cwd);
 
   return traces;
+}
+
+export async function writeLogRefs(
+  rows: ParsedLogRow[],
+  cwd: string = process.cwd(),
+  now: Date = new Date(),
+): Promise<LogRefRecord[]> {
+  const logs = rows.map((row, index) => toLogRefRecord(row, index + 1));
+  const existingSession = await readSessionFile(cwd);
+  const session: SessionFile = {
+    version: 1,
+    updatedAt: now.toISOString(),
+    traces: existingSession?.traces ?? [],
+    logs,
+  };
+
+  if (existingSession?.currentService !== undefined) {
+    session.currentService = existingSession.currentService;
+  }
+
+  await writeSessionFile(session, cwd);
+
+  return logs;
+}
+
+export async function writeSelectedService(
+  serviceName: string,
+  cwd: string = process.cwd(),
+  now: Date = new Date(),
+): Promise<void> {
+  const existingSession = await readSessionFile(cwd);
+  const session: SessionFile = {
+    version: 1,
+    updatedAt: now.toISOString(),
+    traces: existingSession?.traces ?? [],
+    logs: existingSession?.logs ?? [],
+    currentService: serviceName,
+  };
+
+  await writeSessionFile(session, cwd);
+}
+
+export async function readSelectedService(
+  cwd: string = process.cwd(),
+): Promise<string | undefined> {
+  const session = await readSessionFile(cwd);
+
+  return session?.currentService;
 }
 
 export async function resolveTraceIdOrRef(
@@ -101,10 +161,27 @@ async function readSessionFile(cwd: string): Promise<SessionFile | undefined> {
       return undefined;
     }
 
-    return parsed;
+    return {
+      ...parsed,
+      logs: parsed.logs ?? [],
+    };
   } catch {
     return undefined;
   }
+}
+
+async function writeSessionFile(
+  session: SessionFile,
+  cwd: string,
+): Promise<void> {
+  const directory = join(cwd, sessionDirectory);
+
+  await mkdir(directory, { recursive: true });
+  await writeFile(
+    join(directory, sessionFileName),
+    `${JSON.stringify(session, null, 2)}\n`,
+    "utf8",
+  );
 }
 
 function isSessionFile(value: unknown): value is SessionFile {
@@ -114,7 +191,11 @@ function isSessionFile(value: unknown): value is SessionFile {
 
   const record = value as Record<string, unknown>;
 
-  return record.version === 1 && Array.isArray(record.traces);
+  return (
+    record.version === 1 &&
+    Array.isArray(record.traces) &&
+    (record.logs === undefined || Array.isArray(record.logs))
+  );
 }
 
 function toTraceRefRecord(
@@ -148,6 +229,31 @@ function toTraceRefRecord(
 
   if (row.timestamp !== undefined) {
     record.timestamp = row.timestamp;
+  }
+
+  return record;
+}
+
+function toLogRefRecord(row: ParsedLogRow, ordinal: number): LogRefRecord {
+  const record: LogRefRecord = {
+    ref: `@l${ordinal}`,
+    attributes: row.attributes,
+  };
+
+  if (row.timestamp !== undefined) {
+    record.timestamp = row.timestamp;
+  }
+
+  if (row.traceId !== undefined) {
+    record.traceId = row.traceId;
+  }
+
+  if (row.level !== undefined) {
+    record.level = row.level;
+  }
+
+  if (row.message !== undefined) {
+    record.message = row.message;
   }
 
   return record;

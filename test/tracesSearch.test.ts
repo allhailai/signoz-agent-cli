@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -26,14 +26,24 @@ type CapturedRequest = {
 };
 
 describe("traces search command", () => {
-  it("requires --service", async () => {
+  it("fails with next steps when no service is selected", async () => {
     const result = await runCli(["traces", "search"]);
 
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toBe("");
-    expect(result.stderr).toContain(
-      "error: required option '--service <name>' not specified",
+    expect(result.stderr).toBe(
+      [
+        "error no service selected",
+        "Next:",
+        "- signoz-agent services list --since 2h",
+        "- signoz-agent services select <service-name>",
+        "- signoz-agent traces search --service <service-name>",
+        '- signoz-agent traces search --filter "<expr>"',
+        "",
+      ].join("\n"),
     );
+
+    await rm(result.cwd, { recursive: true, force: true });
   });
 
   it("prints compact output and writes an empty ref cache when no rows match", async () => {
@@ -48,9 +58,7 @@ describe("traces search command", () => {
       expect(result.stdout).toContain(
         "0 matching traces for service=barry since=30m\n",
       );
-      expect(result.stdout).toContain(
-        "- widen --since or relax --status/--route filters\n",
-      );
+      expect(result.stdout).toContain("- widen --since or relax filters\n");
       await expect(readSession(result.cwd)).resolves.toMatchObject({
         version: 1,
         traces: [],
@@ -233,10 +241,10 @@ describe("traces search command", () => {
         expect(parsed.count).toBe(1);
         expect(parsed.query).toMatchObject({
           serviceName: "barry",
-          statusExpression: ">=400",
           since: "30m",
           limit: 20,
         });
+        expect(parsed.query).not.toHaveProperty("statusExpression");
         expect(parsed.traces[0]).toMatchObject({
           ref: "@t1",
           traceId: "fedcba9876543210fedcba9876543210",
@@ -252,6 +260,211 @@ describe("traces search command", () => {
         });
       },
     );
+  });
+
+  it("prints raw query_range diagnostics without replacing JSON output", async () => {
+    await withFakeSigNoz(
+      rawRows([
+        traceRow({
+          traceId: "raw-trace",
+          statusCode: 200,
+          method: "GET",
+          route: "/health",
+          durationNano: 1_000_000,
+        }),
+      ]),
+      async ({ url }) => {
+        const result = await runCli(
+          ["traces", "search", "--service", "barry", "--raw"],
+          cliEnv({ SIGNOZ_API_URL: url, SIGNOZ_API_KEY: "test-secret" }),
+        );
+
+        expect(result.exitCode).toBe(0);
+        expect(result.stderr).toBe("");
+
+        const parsed = JSON.parse(result.stdout) as {
+          ok: boolean;
+          command: string;
+          endpoint: string;
+          request: {
+            compositeQuery?: {
+              queries?: Array<{ spec?: { filter?: { expression?: string } } }>;
+            };
+          };
+          httpStatus: number;
+          responseShape: {
+            status: string;
+            data: { type: string };
+            resultSetCount: number;
+            rowCount: number;
+            firstRowKeys: string[];
+          };
+        };
+
+        expect(parsed).toMatchObject({
+          ok: true,
+          command: "traces search",
+          endpoint: "/api/v5/query_range",
+          httpStatus: 200,
+          responseShape: {
+            status: "success",
+            data: { type: "raw" },
+            resultSetCount: 1,
+            rowCount: 1,
+          },
+        });
+        expect(
+          parsed.request.compositeQuery?.queries?.[0]?.spec?.filter?.expression,
+        ).toBe("service.name = 'barry'");
+        expect(parsed.responseShape.firstRowKeys).toEqual([
+          "data",
+          "duration_nano",
+          "trace_id",
+        ]);
+      },
+    );
+  });
+
+  it("rejects combining JSON and raw diagnostics", async () => {
+    const result = await runCli([
+      "traces",
+      "search",
+      "--service",
+      "barry",
+      "--json",
+      "--raw",
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe("error Cannot combine --json and --raw\n");
+
+    await rm(result.cwd, { recursive: true, force: true });
+  });
+
+  it("searches traces by direct SigNoz filter without requiring service", async () => {
+    await withFakeSigNoz(rawRows([]), async ({ requests, url }) => {
+      const result = await runCli(
+        [
+          "traces",
+          "search",
+          "--filter",
+          "barry.agent_run_id = '4'",
+          "--since",
+          "2h",
+        ],
+        cliEnv({ SIGNOZ_API_URL: url, SIGNOZ_API_KEY: "test-secret" }),
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stderr).toBe("");
+      expect(result.stdout).toContain(
+        "0 matching traces for filter=barry.agent_run_id = '4' since=2h\n",
+      );
+
+      const requestBody = JSON.parse(requests[0]?.body ?? "{}") as {
+        compositeQuery?: {
+          queries?: Array<{ spec?: { filter?: { expression?: string } } }>;
+        };
+      };
+
+      expect(
+        requestBody.compositeQuery?.queries?.[0]?.spec?.filter?.expression,
+      ).toBe("barry.agent_run_id = '4'");
+
+      await expect(readSession(result.cwd)).resolves.toMatchObject({
+        version: 1,
+        traces: [],
+      });
+    });
+  });
+
+  it("does not add a hidden failed-status filter for service searches", async () => {
+    await withFakeSigNoz(rawRows([]), async ({ requests, url }) => {
+      const result = await runCli(
+        ["traces", "search", "--service", "opencode-agent", "--since", "2h"],
+        cliEnv({ SIGNOZ_API_URL: url, SIGNOZ_API_KEY: "test-secret" }),
+      );
+
+      expect(result.exitCode).toBe(0);
+
+      const requestBody = JSON.parse(requests[0]?.body ?? "{}") as {
+        compositeQuery?: {
+          queries?: Array<{ spec?: { filter?: { expression?: string } } }>;
+        };
+      };
+
+      expect(
+        requestBody.compositeQuery?.queries?.[0]?.spec?.filter?.expression,
+      ).toBe("service.name = 'opencode-agent'");
+
+      await expect(readSession(result.cwd)).resolves.toMatchObject({
+        version: 1,
+        traces: [],
+      });
+    });
+  });
+
+  it("uses the selected service when no service or filter is provided", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "signoz-agent-test-"));
+
+    try {
+      await writeSession(cwd, {
+        version: 1,
+        updatedAt: "2026-07-06T07:00:00.000Z",
+        traces: [],
+        currentService: "control-tower-api",
+      });
+
+      await withFakeSigNoz(rawRows([]), async ({ requests, url }) => {
+        const result = await runCliInCwd(
+          ["traces", "search", "--since", "30m"],
+          cwd,
+          cliEnv({ SIGNOZ_API_URL: url, SIGNOZ_API_KEY: "test-secret" }),
+        );
+
+        expect(result.exitCode).toBe(0);
+        expect(result.stderr).toBe("");
+        expect(result.stdout).toContain(
+          "0 matching traces for service=control-tower-api since=30m\n",
+        );
+
+        const requestBody = JSON.parse(requests[0]?.body ?? "{}") as {
+          compositeQuery?: {
+            queries?: Array<{ spec?: { filter?: { expression?: string } } }>;
+          };
+        };
+
+        expect(
+          requestBody.compositeQuery?.queries?.[0]?.spec?.filter?.expression,
+        ).toBe("service.name = 'control-tower-api'");
+        await expect(readSession(cwd)).resolves.toMatchObject({
+          currentService: "control-tower-api",
+          traces: [],
+        });
+      });
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects combining direct filters with structured filters", async () => {
+    const result = await runCli([
+      "traces",
+      "search",
+      "--filter",
+      "barry.agent_run_id = '4'",
+      "--service",
+      "barry",
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe(
+      "error Cannot combine --filter with --service, --route, --status, or --min-duration\n",
+    );
+
+    await rm(result.cwd, { recursive: true, force: true });
   });
 
   it("fails clearly when SigNoz returns an error", async () => {
@@ -298,6 +511,14 @@ async function runCli(
 ): Promise<CliResult> {
   const cwd = await mkdtemp(join(tmpdir(), "signoz-agent-test-"));
 
+  return runCliInCwd(args, cwd, env);
+}
+
+async function runCliInCwd(
+  args: string[],
+  cwd: string,
+  env: NodeJS.ProcessEnv = cliEnv(),
+): Promise<CliResult> {
   try {
     const { stdout, stderr } = await execFileAsync(
       process.execPath,
@@ -441,4 +662,13 @@ async function readSession(cwd: string): Promise<unknown> {
   await rm(cwd, { recursive: true, force: true });
 
   return JSON.parse(text) as unknown;
+}
+
+async function writeSession(cwd: string, session: unknown): Promise<void> {
+  await mkdir(join(cwd, ".signoz-agent"), { recursive: true });
+  await writeFile(
+    join(cwd, ".signoz-agent", "session.json"),
+    `${JSON.stringify(session, null, 2)}\n`,
+    "utf8",
+  );
 }

@@ -1,10 +1,25 @@
-import type { TraceRefRecord } from "../session/refStore.js";
+import type { LogRefRecord, TraceRefRecord } from "../session/refStore.js";
 import type { ParsedLogRow } from "../signoz/logRows.js";
+import type { ServiceSummary } from "../signoz/serviceRows.js";
 import type { ParsedTraceRow } from "../signoz/traceRows.js";
 
 export type TraceSearchTextOptions = {
-  serviceName: string;
+  filterExpression?: string;
+  serviceName?: string;
   route?: string;
+  since: string;
+  jsonCommand: string;
+};
+
+export type ServicesListTextOptions = {
+  since: string;
+};
+
+export type LogsSearchTextOptions = {
+  filterExpression?: string;
+  serviceName?: string;
+  contains?: string;
+  traceId?: string;
   since: string;
   jsonCommand: string;
 };
@@ -26,7 +41,29 @@ export function formatTraceSearchText(
     lines.push(`- ${options.jsonCommand}`);
   } else {
     lines.push("Next:");
-    lines.push("- widen --since or relax --status/--route filters");
+    lines.push("- widen --since or relax filters");
+    lines.push(`- ${options.jsonCommand}`);
+  }
+
+  return `${lines.join("\n")}\n`;
+}
+
+export function formatLogsSearchText(
+  logs: LogRefRecord[],
+  options: LogsSearchTextOptions,
+): string {
+  const lines = [formatLogsSearchHeader(logs.length, options), ""];
+
+  for (const log of logs) {
+    lines.push(formatLogRefLine(log));
+  }
+
+  if (logs.length > 0) {
+    lines.push("", "Next:");
+    lines.push(`- ${options.jsonCommand}`);
+  } else {
+    lines.push("Next:");
+    lines.push("- widen --since or relax filters");
     lines.push(`- ${options.jsonCommand}`);
   }
 
@@ -67,6 +104,19 @@ export function formatTraceLogsText(
 ): string {
   const lines = [`${logs.length} logs for trace=${shortTraceId(traceId)}`];
 
+  if (logs.length === 0) {
+    lines.push(
+      "",
+      `No logs with trace_id matched this trace in the selected time window.`,
+      "The service may emit related logs without trace correlation.",
+      "",
+      "Next:",
+      `- signoz-agent logs search --filter "trace_id = '${traceId}'"`,
+      `- signoz-agent logs search --contains "<known task id or message>"`,
+      `- signoz-agent trace inspect ${shellToken(traceId)} --json`,
+    );
+  }
+
   for (const log of logs) {
     const timestamp = log.timestamp ?? "time=?";
     const level = log.level ?? "level=?";
@@ -76,6 +126,38 @@ export function formatTraceLogsText(
   }
 
   return `${lines.join("\n")}\n`;
+}
+
+export function formatServicesListText(
+  services: ServiceSummary[],
+  options: ServicesListTextOptions,
+): string {
+  const lines = [
+    `${services.length} ${services.length === 1 ? "service" : "services"} since=${options.since}`,
+    "",
+  ];
+
+  for (const service of services) {
+    lines.push(formatServiceLine(service));
+  }
+
+  const firstService = services[0];
+
+  if (firstService !== undefined) {
+    lines.push("", "Next:");
+    lines.push(
+      `- signoz-agent services select ${shellToken(firstService.serviceName)}`,
+    );
+  } else {
+    lines.push("Next:");
+    lines.push("- widen --since");
+  }
+
+  return `${lines.join("\n")}\n`;
+}
+
+export function formatSelectedServiceText(serviceName: string): string {
+  return `${serviceName}\n`;
 }
 
 function summarizeTrace(
@@ -135,13 +217,37 @@ function formatTraceSearchHeader(
   count: number,
   options: TraceSearchTextOptions,
 ): string {
-  const parts = [
-    `${count} matching ${count === 1 ? "trace" : "traces"}`,
-    `for service=${options.serviceName}`,
-  ];
+  const parts = [`${count} matching ${count === 1 ? "trace" : "traces"}`];
+
+  if (options.filterExpression !== undefined) {
+    parts.push(`for filter=${options.filterExpression}`);
+  } else if (options.serviceName !== undefined) {
+    parts.push(`for service=${options.serviceName}`);
+  }
 
   if (options.route !== undefined) {
     parts.push(`route=${options.route}`);
+  }
+
+  parts.push(`since=${options.since}`);
+
+  return parts.join(" ");
+}
+
+function formatLogsSearchHeader(
+  count: number,
+  options: LogsSearchTextOptions,
+): string {
+  const parts = [`${count} matching ${count === 1 ? "log" : "logs"}`];
+
+  if (options.filterExpression !== undefined) {
+    parts.push(`for filter=${options.filterExpression}`);
+  } else if (options.contains !== undefined) {
+    parts.push(`containing=${options.contains}`);
+  } else if (options.traceId !== undefined) {
+    parts.push(`for trace=${shortTraceId(options.traceId)}`);
+  } else if (options.serviceName !== undefined) {
+    parts.push(`for service=${options.serviceName}`);
   }
 
   parts.push(`since=${options.since}`);
@@ -157,6 +263,49 @@ function formatTraceLine(trace: TraceRefRecord): string {
     trace.durationMs === undefined ? "?ms" : `${trace.durationMs}ms`;
 
   return `${trace.ref} ${status} ${method} ${route} ${duration} trace=${shortTraceId(trace.traceId)}`;
+}
+
+function formatLogRefLine(log: LogRefRecord): string {
+  const timestamp = log.timestamp ?? "time=?";
+  const level = log.level ?? "level=?";
+  const trace =
+    log.traceId === undefined
+      ? "trace=?"
+      : `trace=${shortTraceId(log.traceId)}`;
+  const message = summarizeMessage(log.message);
+
+  return `${log.ref} ${timestamp} ${level} ${trace} ${message}`;
+}
+
+function formatServiceLine(service: ServiceSummary): string {
+  const latest =
+    service.latestTimestamp === undefined
+      ? "latest=?"
+      : `latest=${service.latestTimestamp}`;
+
+  return `${service.serviceName} traces=${service.traceCount} errors=${service.errorCount} ${latest}`;
+}
+
+function summarizeMessage(message: string | undefined): string {
+  if (message === undefined || message.trim() === "") {
+    return "message=?";
+  }
+
+  const compact = message.replace(/\s+/g, " ").trim();
+
+  if (compact.length <= 120) {
+    return compact;
+  }
+
+  return `${compact.slice(0, 117)}...`;
+}
+
+function shellToken(value: string): string {
+  if (/^[A-Za-z0-9_./:@-]+$/.test(value)) {
+    return value;
+  }
+
+  return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
 function shortTraceId(traceId: string): string {

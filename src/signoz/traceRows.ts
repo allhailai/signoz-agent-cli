@@ -85,6 +85,10 @@ function parseTraceRow(row: unknown): ParsedTraceRow[] {
   const attributes = {
     ...asRecord(record.attributes),
     ...asRecord(data?.attributes),
+    ...asRecord(record.resource),
+    ...asRecord(record.resources),
+    ...asRecord(data?.resource),
+    ...asRecord(data?.resources),
   };
   const traceId = firstString([
     record.traceId,

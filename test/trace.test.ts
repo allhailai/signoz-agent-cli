@@ -161,6 +161,73 @@ describe("trace inspect command", () => {
     });
   });
 
+  it("prints raw query_range diagnostics for trace inspect", async () => {
+    await withFakeSigNoz(rawRows([traceSpan()]), async ({ url }) => {
+      const result = await runCli(
+        ["trace", "inspect", "trace-raw", "--raw"],
+        cliEnv({ SIGNOZ_API_URL: url, SIGNOZ_API_KEY: "test-secret" }),
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stderr).toBe("");
+
+      const parsed = JSON.parse(result.stdout) as {
+        ok: boolean;
+        command: string;
+        endpoint: string;
+        request: {
+          compositeQuery?: {
+            queries?: Array<{ spec?: { filter?: { expression?: string } } }>;
+          };
+        };
+        httpStatus: number;
+        responseShape: {
+          status: string;
+          data: { type: string };
+          resultSetCount: number;
+          rowCount: number;
+          firstRowKeys: string[];
+        };
+      };
+
+      expect(parsed).toMatchObject({
+        ok: true,
+        command: "trace inspect",
+        endpoint: "/api/v5/query_range",
+        httpStatus: 200,
+        responseShape: {
+          status: "success",
+          data: { type: "raw" },
+          resultSetCount: 1,
+          rowCount: 1,
+        },
+      });
+      expect(
+        parsed.request.compositeQuery?.queries?.[0]?.spec?.filter?.expression,
+      ).toBe("trace_id = 'trace-raw'");
+      expect(parsed.responseShape.firstRowKeys).toEqual([
+        "data",
+        "duration_nano",
+        "span_id",
+        "trace_id",
+      ]);
+    });
+  });
+
+  it("rejects combining JSON and raw diagnostics for trace inspect", async () => {
+    const result = await runCli([
+      "trace",
+      "inspect",
+      "trace-raw",
+      "--json",
+      "--raw",
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe("error Cannot combine --json and --raw\n");
+  });
+
   it("fails clearly when SigNoz returns an error", async () => {
     await withFakeSigNoz(
       { status: "error", error: "boom" },
@@ -248,7 +315,20 @@ describe("trace logs command", () => {
 
       expect(result.exitCode).toBe(0);
       expect(result.stderr).toBe("");
-      expect(result.stdout).toBe("0 logs for trace=trace-empty\n");
+      expect(result.stdout).toBe(
+        [
+          "0 logs for trace=trace-empty",
+          "",
+          "No logs with trace_id matched this trace in the selected time window.",
+          "The service may emit related logs without trace correlation.",
+          "",
+          "Next:",
+          "- signoz-agent logs search --filter \"trace_id = 'trace-empty'\"",
+          '- signoz-agent logs search --contains "<known task id or message>"',
+          "- signoz-agent trace inspect trace-empty --json",
+          "",
+        ].join("\n"),
+      );
     });
   });
 
@@ -314,6 +394,68 @@ describe("trace logs command", () => {
             component: "worker",
           },
         });
+      },
+    );
+  });
+
+  it("prints raw query_range diagnostics for trace logs", async () => {
+    await withFakeSigNoz(
+      rawRows([
+        logRow({
+          timestamp: "2026-07-03T12:00:00Z",
+          level: "ERROR",
+          message: "webhook failed",
+        }),
+      ]),
+      async ({ url }) => {
+        const result = await runCli(
+          ["trace", "logs", "trace-logs-raw", "--raw"],
+          cliEnv({ SIGNOZ_API_URL: url, SIGNOZ_API_KEY: "test-secret" }),
+        );
+
+        expect(result.exitCode).toBe(0);
+        expect(result.stderr).toBe("");
+
+        const parsed = JSON.parse(result.stdout) as {
+          ok: boolean;
+          command: string;
+          endpoint: string;
+          request: {
+            compositeQuery?: {
+              queries?: Array<{ spec?: { filter?: { expression?: string } } }>;
+            };
+          };
+          httpStatus: number;
+          responseShape: {
+            status: string;
+            data: { type: string };
+            resultSetCount: number;
+            rowCount: number;
+            firstRowKeys: string[];
+          };
+        };
+
+        expect(parsed).toMatchObject({
+          ok: true,
+          command: "trace logs",
+          endpoint: "/api/v5/query_range",
+          httpStatus: 200,
+          responseShape: {
+            status: "success",
+            data: { type: "raw" },
+            resultSetCount: 1,
+            rowCount: 1,
+          },
+        });
+        expect(
+          parsed.request.compositeQuery?.queries?.[0]?.spec?.filter?.expression,
+        ).toBe("trace_id = 'trace-logs-raw'");
+        expect(parsed.responseShape.firstRowKeys).toEqual([
+          "attributes",
+          "body",
+          "severity_text",
+          "timestamp",
+        ]);
       },
     );
   });
