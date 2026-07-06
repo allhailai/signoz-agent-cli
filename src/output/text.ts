@@ -4,7 +4,8 @@ import type { ServiceSummary } from "../signoz/serviceRows.js";
 import type { ParsedTraceRow } from "../signoz/traceRows.js";
 
 export type TraceSearchTextOptions = {
-  serviceName: string;
+  filterExpression?: string;
+  serviceName?: string;
   route?: string;
   since: string;
   jsonCommand: string;
@@ -31,7 +32,7 @@ export function formatTraceSearchText(
     lines.push(`- ${options.jsonCommand}`);
   } else {
     lines.push("Next:");
-    lines.push("- widen --since or relax --status/--route filters");
+    lines.push("- widen --since or relax filters");
     lines.push(`- ${options.jsonCommand}`);
   }
 
@@ -172,10 +173,13 @@ function formatTraceSearchHeader(
   count: number,
   options: TraceSearchTextOptions,
 ): string {
-  const parts = [
-    `${count} matching ${count === 1 ? "trace" : "traces"}`,
-    `for service=${options.serviceName}`,
-  ];
+  const parts = [`${count} matching ${count === 1 ? "trace" : "traces"}`];
+
+  if (options.filterExpression !== undefined) {
+    parts.push(`for filter=${options.filterExpression}`);
+  } else if (options.serviceName !== undefined) {
+    parts.push(`for service=${options.serviceName}`);
+  }
 
   if (options.route !== undefined) {
     parts.push(`route=${options.route}`);

@@ -1,13 +1,17 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  buildServicesListQueryRange,
   buildFailedTracesSearchQueryRange,
+  buildRawQueryRange,
+  buildServicesListQueryRange,
   buildTraceInspectQueryRange,
   buildTraceLogsQueryRange,
+  buildTracesSearchQueryRange,
   epochMillisWindowSince,
+  logBodyContainsExpression,
   parseRelativeDuration,
   queryRangeEndpoint,
+  safeEqualityExpression,
   signozTracesSource,
   type QueryRangePayload,
   type SigNozBuilderQuerySpec,
@@ -91,6 +95,58 @@ describe("query_range builders", () => {
     expect(builderQuery.filter.expression).toBe("service.name = 'barry'");
   });
 
+  it("builds trace search payloads from arbitrary filters", () => {
+    const payload = buildTracesSearchQueryRange({
+      filterExpression: "barry.agent_run_id = '4'",
+      since: "2h",
+      limit: 11,
+      now: 1_700_000_000_000,
+    });
+    const builderQuery = getOnlyBuilderQuery(payload);
+
+    expect(payload.start).toBe(1_699_992_800_000);
+    expect(builderQuery.signal).toBe("traces");
+    expect(builderQuery.source).toBe(signozTracesSource);
+    expect(builderQuery.limit).toBe(11);
+    expect(builderQuery.filter.expression).toBe("barry.agent_run_id = '4'");
+  });
+
+  it("builds raw query_range payloads for reusable builders", () => {
+    const payload = buildRawQueryRange({
+      signal: "logs",
+      filterExpression: "service.name = 'barry'",
+      since: "15m",
+      limit: 9,
+      now: 1_700_000_000_000,
+    });
+    const builderQuery = getOnlyBuilderQuery(payload);
+
+    expect(payload).toMatchObject({
+      start: 1_699_999_100_000,
+      end: 1_700_000_000_000,
+      requestType: "raw",
+      compositeQuery: {
+        queries: [
+          {
+            type: "builder_query",
+            spec: {
+              name: "A",
+              signal: "logs",
+              disabled: false,
+              filter: {
+                expression: "service.name = 'barry'",
+              },
+              selectFields: [],
+              limit: 9,
+              offset: 0,
+            },
+          },
+        ],
+      },
+    });
+    expect(builderQuery).not.toHaveProperty("source");
+  });
+
   it("escapes single quotes in trace filter string values", () => {
     const payload = buildFailedTracesSearchQueryRange({
       serviceName: "barry's worker",
@@ -101,6 +157,18 @@ describe("query_range builders", () => {
 
     expect(builderQuery.filter.expression).toBe(
       "service.name = 'barry\\'s worker' AND http.route = '/webhooks/signoz\\'s-test'",
+    );
+  });
+
+  it("builds safe equality expressions", () => {
+    expect(safeEqualityExpression("service.name", "barry's worker")).toBe(
+      "service.name = 'barry\\'s worker'",
+    );
+  });
+
+  it("builds log body contains expressions", () => {
+    expect(logBodyContainsExpression("hello 'world'")).toBe(
+      "body contains 'hello \\'world\\''",
     );
   });
 

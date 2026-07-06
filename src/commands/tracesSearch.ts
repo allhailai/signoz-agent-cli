@@ -3,31 +3,44 @@ import { Command, InvalidArgumentError } from "commander";
 import { ConfigError, loadConfig } from "../config.js";
 import { formatTraceSearchJson } from "../output/json.js";
 import { formatTraceSearchText } from "../output/text.js";
-import { writeTraceRefs } from "../session/refStore.js";
+import { readSelectedService, writeTraceRefs } from "../session/refStore.js";
 import {
   SigNozClient,
   SigNozNetworkError,
   type SigNozResponse,
 } from "../signoz/client.js";
 import {
-  buildFailedTracesSearchQueryRange,
+  buildTracesSearchQueryRange,
   queryRangeEndpoint,
 } from "../signoz/queryRange.js";
 import { parseRawTraceRows } from "../signoz/traceRows.js";
 
 type TracesSearchOptions = {
-  service: string;
+  filter?: string;
+  service?: string;
   route?: string;
-  status: string;
+  status?: string;
   minDuration?: number;
   since: string;
   limit: number;
   json?: boolean;
 };
 
+type ResolvedTraceSearchOptions = {
+  filterExpression?: string;
+  serviceName?: string;
+  route?: string;
+  statusExpression?: string;
+  minDurationMs?: number;
+  since: string;
+  limit: number;
+};
+
 type TraceSearchFailure = {
   ok: false;
   code:
+    | "missing_selection"
+    | "invalid_options"
     | "missing_config"
     | "invalid_config"
     | "unreachable"
@@ -40,7 +53,6 @@ type TraceSearchFailure = {
 };
 
 const defaultSince = "30m";
-const defaultStatusExpression = ">=400";
 const defaultLimit = 20;
 
 export function registerTracesSearchCommand(program: Command): void {
@@ -48,14 +60,11 @@ export function registerTracesSearchCommand(program: Command): void {
 
   traces
     .command("search")
-    .description("Search failing traces and assign session-local refs.")
-    .requiredOption("--service <name>", "Service name to search.")
+    .description("Search traces and assign session-local refs.")
+    .option("--filter <expr>", "Direct SigNoz trace filter expression.")
+    .option("--service <name>", "Service name to search.")
     .option("--route <route>", "HTTP route to match.")
-    .option(
-      "--status <expr>",
-      "HTTP status expression to match.",
-      defaultStatusExpression,
-    )
+    .option("--status <expr>", "HTTP status expression to match.")
     .option("--min-duration <ms>", "Minimum duration in milliseconds.", parseMs)
     .option("--since <duration>", "Relative time window.", defaultSince)
     .option("--limit <n>", "Maximum rows to return.", parseLimit, defaultLimit)
@@ -74,11 +83,17 @@ async function runTracesSearch(
   options: TracesSearchOptions,
 ): Promise<{ ok: true } | TraceSearchFailure> {
   try {
+    const resolvedOptions = await resolveTraceSearchOptions(options);
+
+    if (!resolvedOptions.ok) {
+      return resolvedOptions;
+    }
+
     const config = loadConfig();
     const client = new SigNozClient(config);
     const response = await client.postJson(
       queryRangeEndpoint,
-      buildFailedTracesSearchQueryRange(traceSearchQueryOptions(options)),
+      buildTracesSearchQueryRange(resolvedOptions.options),
     );
 
     if (!response.ok) {
@@ -98,23 +113,86 @@ async function runTracesSearch(
     }
 
     const refs = await writeTraceRefs(parsed.rows);
-    const jsonOptions = traceSearchJsonOptions(options);
 
     if (options.json === true) {
       process.stdout.write(
-        formatTraceSearchJson(parsed.rows, refs, jsonOptions),
+        formatTraceSearchJson(parsed.rows, refs, resolvedOptions.options),
       );
       return { ok: true };
     }
 
     process.stdout.write(
-      formatTraceSearchText(refs, traceSearchTextOptions(options)),
+      formatTraceSearchText(
+        refs,
+        traceSearchTextOptions(resolvedOptions.options),
+      ),
     );
 
     return { ok: true };
   } catch (error) {
     return traceSearchFailureFromError(error);
   }
+}
+
+async function resolveTraceSearchOptions(
+  options: TracesSearchOptions,
+): Promise<
+  { ok: true; options: ResolvedTraceSearchOptions } | TraceSearchFailure
+> {
+  if (options.filter !== undefined && hasStructuredTraceFilters(options)) {
+    return {
+      ok: false,
+      code: "invalid_options",
+      message:
+        "Cannot combine --filter with --service, --route, --status, or --min-duration",
+    };
+  }
+
+  if (options.filter !== undefined) {
+    return {
+      ok: true,
+      options: {
+        filterExpression: options.filter,
+        since: options.since,
+        limit: options.limit,
+      },
+    };
+  }
+
+  const serviceName = options.service ?? (await readSelectedService());
+
+  if (serviceName === undefined) {
+    return {
+      ok: false,
+      code: "missing_selection",
+      message: "No service selected",
+    };
+  }
+
+  return {
+    ok: true,
+    options: {
+      serviceName,
+      since: options.since,
+      limit: options.limit,
+      ...(options.route === undefined ? {} : { route: options.route }),
+      ...(options.status === undefined
+        ? {}
+        : { statusExpression: options.status }),
+      ...(options.minDuration === undefined
+        ? {}
+        : { minDurationMs: options.minDuration }),
+    },
+  };
+}
+
+function hasStructuredTraceFilters(options: TracesSearchOptions): boolean {
+  return (
+    options.service !== undefined ||
+    options.route !== undefined ||
+    options.status !== undefined ||
+    options.minDuration !== undefined
+  );
 }
 
 function parseMs(value: string): number {
@@ -192,6 +270,17 @@ function writeFailure(result: TraceSearchFailure, json: boolean): void {
 
 function formatFailure(result: TraceSearchFailure): string {
   switch (result.code) {
+    case "missing_selection":
+      return [
+        "error no service selected",
+        "Next:",
+        "- signoz-agent services list --since 2h",
+        "- signoz-agent services select <service-name>",
+        "- signoz-agent traces search --service <service-name>",
+        '- signoz-agent traces search --filter "<expr>"',
+      ].join("\n");
+    case "invalid_options":
+      return `error ${result.message}`;
     case "missing_config":
       return `error missing ${formatMissingVariables(result.missingVariables)}`;
     case "invalid_config":
@@ -219,72 +308,47 @@ function formatMissingVariables(
   return missingVariables.join(",");
 }
 
-function traceSearchJsonOptions(options: TracesSearchOptions): {
-  serviceName: string;
-  route?: string;
-  statusExpression: string;
-  minDurationMs?: number;
-  since: string;
-  limit: number;
-} {
-  const jsonOptions = {
-    serviceName: options.service,
-    statusExpression: options.status,
-    since: options.since,
-    limit: options.limit,
-  };
-
-  return {
-    ...jsonOptions,
-    ...(options.route === undefined ? {} : { route: options.route }),
-    ...(options.minDuration === undefined
-      ? {}
-      : { minDurationMs: options.minDuration }),
-  };
-}
-
-function traceSearchQueryOptions(options: TracesSearchOptions): {
-  serviceName: string;
-  route?: string;
-  statusExpression: string;
-  minDurationMs?: number;
-  since: string;
-  limit: number;
-} {
-  return traceSearchJsonOptions(options);
-}
-
-function traceSearchTextOptions(options: TracesSearchOptions): {
-  serviceName: string;
+function traceSearchTextOptions(options: ResolvedTraceSearchOptions): {
+  serviceName?: string;
+  filterExpression?: string;
   route?: string;
   since: string;
   jsonCommand: string;
 } {
   return {
-    serviceName: options.service,
     since: options.since,
     jsonCommand: buildJsonCommand(options),
+    ...(options.filterExpression === undefined
+      ? {}
+      : { filterExpression: options.filterExpression }),
+    ...(options.serviceName === undefined
+      ? {}
+      : { serviceName: options.serviceName }),
     ...(options.route === undefined ? {} : { route: options.route }),
   };
 }
 
-function buildJsonCommand(options: TracesSearchOptions): string {
-  const args = [
-    "signoz-agent",
-    "traces",
-    "search",
-    "--service",
-    shellToken(options.service),
-  ];
+function buildJsonCommand(options: ResolvedTraceSearchOptions): string {
+  const args = ["signoz-agent", "traces", "search"];
+
+  if (options.filterExpression !== undefined) {
+    args.push("--filter", shellToken(options.filterExpression));
+  }
+
+  if (options.serviceName !== undefined) {
+    args.push("--service", shellToken(options.serviceName));
+  }
 
   if (options.route !== undefined) {
     args.push("--route", shellToken(options.route));
   }
 
-  args.push("--status", shellToken(options.status));
+  if (options.statusExpression !== undefined) {
+    args.push("--status", shellToken(options.statusExpression));
+  }
 
-  if (options.minDuration !== undefined) {
-    args.push("--min-duration", options.minDuration.toString());
+  if (options.minDurationMs !== undefined) {
+    args.push("--min-duration", options.minDurationMs.toString());
   }
 
   args.push("--since", shellToken(options.since));

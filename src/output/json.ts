@@ -4,9 +4,10 @@ import type { ServiceSummary } from "../signoz/serviceRows.js";
 import type { ParsedTraceRow } from "../signoz/traceRows.js";
 
 export type TraceSearchJsonOptions = {
-  serviceName: string;
+  filterExpression?: string;
+  serviceName?: string;
   route?: string;
-  statusExpression: string;
+  statusExpression?: string;
   minDurationMs?: number;
   since: string;
   limit: number;
