@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildFailedTracesSearchQueryRange,
+  buildLogsSearchQueryRange,
   buildRawQueryRange,
   buildServicesListQueryRange,
   buildTraceInspectQueryRange,
@@ -169,6 +170,50 @@ describe("query_range builders", () => {
   it("builds log body contains expressions", () => {
     expect(logBodyContainsExpression("hello 'world'")).toBe(
       "body contains 'hello \\'world\\''",
+    );
+  });
+
+  it("builds log search payloads from direct filters", () => {
+    const payload = buildLogsSearchQueryRange({
+      filterExpression: "barry.agent_run_id = '4'",
+      since: "2h",
+      limit: 11,
+      now: 1_700_000_000_000,
+    });
+    const builderQuery = getOnlyBuilderQuery(payload);
+
+    expect(payload.start).toBe(1_699_992_800_000);
+    expect(builderQuery.signal).toBe("logs");
+    expect(builderQuery).not.toHaveProperty("source");
+    expect(builderQuery.limit).toBe(11);
+    expect(builderQuery.filter.expression).toBe("barry.agent_run_id = '4'");
+  });
+
+  it("builds log search payloads from contains text", () => {
+    const payload = buildLogsSearchQueryRange({
+      contains: "hello world",
+      since: "2h",
+      limit: 11,
+      now: 1_700_000_000_000,
+    });
+    const builderQuery = getOnlyBuilderQuery(payload);
+
+    expect(builderQuery.signal).toBe("logs");
+    expect(builderQuery.filter.expression).toBe("body contains 'hello world'");
+  });
+
+  it("builds log search payloads from selected service", () => {
+    const payload = buildLogsSearchQueryRange({
+      serviceName: "control-tower-api",
+      since: "30m",
+      limit: 5,
+      now: 1_700_000_000_000,
+    });
+    const builderQuery = getOnlyBuilderQuery(payload);
+
+    expect(builderQuery.signal).toBe("logs");
+    expect(builderQuery.filter.expression).toBe(
+      "service.name = 'control-tower-api'",
     );
   });
 

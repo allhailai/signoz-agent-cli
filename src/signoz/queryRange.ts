@@ -50,6 +50,16 @@ export type TraceSearchQueryOptions = {
   now?: number;
 };
 
+export type LogsSearchQueryOptions = {
+  filterExpression?: string;
+  serviceName?: string;
+  contains?: string;
+  traceId?: string;
+  since?: string;
+  limit?: number;
+  now?: number;
+};
+
 export type TraceLogsQueryOptions = {
   traceId: string;
   since?: string;
@@ -165,6 +175,40 @@ export function buildTraceLogsQueryRange(
       filterKeys.traceId,
       options.traceId,
     ),
+    since: options.since,
+    limit: options.limit,
+    now: options.now,
+  });
+}
+
+export function buildLogsSearchQueryRange(
+  options: LogsSearchQueryOptions,
+): QueryRangePayload {
+  const expressions: string[] = [];
+
+  if (options.filterExpression !== undefined) {
+    expressions.push(options.filterExpression);
+  }
+
+  if (options.serviceName !== undefined) {
+    expressions.push(
+      safeEqualityExpression(filterKeys.serviceName, options.serviceName),
+    );
+  }
+
+  if (options.contains !== undefined) {
+    expressions.push(logBodyContainsExpression(options.contains));
+  }
+
+  if (options.traceId !== undefined) {
+    expressions.push(
+      safeEqualityExpression(filterKeys.traceId, options.traceId),
+    );
+  }
+
+  return buildRawQueryRange({
+    signal: "logs",
+    filterExpression: andExpression(expressions),
     since: options.since,
     limit: options.limit,
     now: options.now,
