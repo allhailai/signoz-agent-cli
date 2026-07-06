@@ -284,7 +284,7 @@ describe("query_range builders", () => {
     expect(builderQuery.signal).toBe("traces");
     expect(builderQuery.source).toBe(signozTracesSource);
     expect(builderQuery.limit).toBe(100);
-    expect(builderQuery.filter.expression).toBe("service.name != ''");
+    expect(builderQuery.filter.expression).toBe("");
   });
 });
 

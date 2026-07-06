@@ -237,7 +237,7 @@ export function buildServicesListQueryRange(
   return buildRawQueryRange({
     signal: "traces",
     source: signozTracesSource,
-    filterExpression: `${filterKeys.serviceName} != ''`,
+    filterExpression: "",
     since: options.since,
     limit: options.limit,
     now: options.now,

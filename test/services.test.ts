@@ -92,7 +92,7 @@ describe("services command", () => {
         expect(requests[0]?.apiKey).toBe("test-secret");
         expect(
           requestBody.compositeQuery?.queries?.[0]?.spec?.filter?.expression,
-        ).toBe("service.name != ''");
+        ).toBe("");
         expect(requestBody.compositeQuery?.queries?.[0]?.spec?.limit).toBe(60);
 
         await rm(result.cwd, { recursive: true, force: true });
@@ -208,7 +208,7 @@ describe("services command", () => {
         });
         expect(
           parsed.request.compositeQuery?.queries?.[0]?.spec?.filter?.expression,
-        ).toBe("service.name != ''");
+        ).toBe("");
         expect(parsed.request.compositeQuery?.queries?.[0]?.spec?.limit).toBe(
           60,
         );
@@ -456,16 +456,20 @@ function traceRow(options: {
     trace_id: string;
     timestamp?: string;
     data: {
-      attributes: {
+      resource: {
         "service.name": string;
+      };
+      attributes: {
         "http.response.status_code": number;
       };
     };
   } = {
     trace_id: options.traceId,
     data: {
-      attributes: {
+      resource: {
         "service.name": options.serviceName,
+      },
+      attributes: {
         "http.response.status_code": options.statusCode,
       },
     },
