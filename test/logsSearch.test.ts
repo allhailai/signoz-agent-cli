@@ -297,6 +297,69 @@ describe("logs search command", () => {
     );
   });
 
+  it("prints raw query_range diagnostics for log searches", async () => {
+    await withFakeSigNoz(
+      rawRows([
+        logRow({
+          timestamp: "2026-07-06T07:10:00Z",
+          level: "INFO",
+          message: "agent run started",
+          traceId: "trace-json",
+        }),
+      ]),
+      async ({ url }) => {
+        const result = await runCli(
+          ["logs", "search", "--contains", "agent run", "--raw"],
+          cliEnv({ SIGNOZ_API_URL: url, SIGNOZ_API_KEY: "test-secret" }),
+        );
+
+        expect(result.exitCode).toBe(0);
+        expect(result.stderr).toBe("");
+
+        const parsed = JSON.parse(result.stdout) as {
+          ok: boolean;
+          command: string;
+          endpoint: string;
+          request: {
+            compositeQuery?: {
+              queries?: Array<{ spec?: { filter?: { expression?: string } } }>;
+            };
+          };
+          httpStatus: number;
+          responseShape: {
+            status: string;
+            data: { type: string };
+            resultSetCount: number;
+            rowCount: number;
+            firstRowKeys: string[];
+          };
+        };
+
+        expect(parsed).toMatchObject({
+          ok: true,
+          command: "logs search",
+          endpoint: "/api/v5/query_range",
+          httpStatus: 200,
+          responseShape: {
+            status: "success",
+            data: { type: "raw" },
+            resultSetCount: 1,
+            rowCount: 1,
+          },
+        });
+        expect(
+          parsed.request.compositeQuery?.queries?.[0]?.spec?.filter?.expression,
+        ).toBe("body contains 'agent run'");
+        expect(parsed.responseShape.firstRowKeys).toEqual([
+          "attributes",
+          "body",
+          "severity_text",
+          "timestamp",
+        ]);
+      },
+    );
+  });
+
   it("rejects combining explicit selectors", async () => {
     const result = await runCli([
       "logs",
@@ -312,6 +375,23 @@ describe("logs search command", () => {
     expect(result.stderr).toBe(
       "error Cannot combine --filter, --contains, or --trace-id\n",
     );
+
+    await rm(result.cwd, { recursive: true, force: true });
+  });
+
+  it("rejects combining JSON and raw diagnostics", async () => {
+    const result = await runCli([
+      "logs",
+      "search",
+      "--contains",
+      "hello world",
+      "--json",
+      "--raw",
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe("error Cannot combine --json and --raw\n");
 
     await rm(result.cwd, { recursive: true, force: true });
   });

@@ -2,6 +2,7 @@ import { Command, InvalidArgumentError } from "commander";
 
 import { ConfigError, loadConfig } from "../config.js";
 import { formatTraceSearchJson } from "../output/json.js";
+import { formatRawQueryRangeDiagnostic } from "../output/raw.js";
 import { formatTraceSearchText } from "../output/text.js";
 import { readSelectedService, writeTraceRefs } from "../session/refStore.js";
 import {
@@ -24,6 +25,7 @@ type TracesSearchOptions = {
   since: string;
   limit: number;
   json?: boolean;
+  raw?: boolean;
 };
 
 type ResolvedTraceSearchOptions = {
@@ -69,11 +71,12 @@ export function registerTracesSearchCommand(program: Command): void {
     .option("--since <duration>", "Relative time window.", defaultSince)
     .option("--limit <n>", "Maximum rows to return.", parseLimit, defaultLimit)
     .option("--json", "Print structured JSON output.")
+    .option("--raw", "Print raw query_range diagnostics.")
     .action(async (options: TracesSearchOptions) => {
       const result = await runTracesSearch(options);
 
       if (!result.ok) {
-        writeFailure(result, options.json === true);
+        writeFailure(result, options.json === true && options.raw !== true);
         process.exitCode = 1;
       }
     });
@@ -83,6 +86,14 @@ async function runTracesSearch(
   options: TracesSearchOptions,
 ): Promise<{ ok: true } | TraceSearchFailure> {
   try {
+    if (options.json === true && options.raw === true) {
+      return {
+        ok: false,
+        code: "invalid_options",
+        message: "Cannot combine --json and --raw",
+      };
+    }
+
     const resolvedOptions = await resolveTraceSearchOptions(options);
 
     if (!resolvedOptions.ok) {
@@ -91,10 +102,20 @@ async function runTracesSearch(
 
     const config = loadConfig();
     const client = new SigNozClient(config);
-    const response = await client.postJson(
-      queryRangeEndpoint,
-      buildTracesSearchQueryRange(resolvedOptions.options),
-    );
+    const requestPayload = buildTracesSearchQueryRange(resolvedOptions.options);
+    const response = await client.postJson(queryRangeEndpoint, requestPayload);
+
+    if (options.raw === true) {
+      process.stdout.write(
+        formatRawQueryRangeDiagnostic({
+          command: "traces search",
+          endpoint: queryRangeEndpoint,
+          request: requestPayload,
+          response,
+        }),
+      );
+      return { ok: true };
+    }
 
     if (!response.ok) {
       return signozFailure(response);

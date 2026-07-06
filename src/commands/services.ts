@@ -2,6 +2,7 @@ import { Command, InvalidArgumentError } from "commander";
 
 import { ConfigError, loadConfig } from "../config.js";
 import { formatServicesListJson } from "../output/json.js";
+import { formatRawQueryRangeDiagnostic } from "../output/raw.js";
 import {
   formatSelectedServiceText,
   formatServicesListText,
@@ -26,6 +27,7 @@ type ServicesListOptions = {
   since: string;
   limit: number;
   json?: boolean;
+  raw?: boolean;
 };
 
 type ServicesFailure = {
@@ -33,6 +35,7 @@ type ServicesFailure = {
   command: "list" | "current";
   code:
     | "missing_selection"
+    | "invalid_options"
     | "missing_config"
     | "invalid_config"
     | "unreachable"
@@ -64,11 +67,12 @@ export function registerServicesCommand(program: Command): void {
       defaultLimit,
     )
     .option("--json", "Print structured JSON output.")
+    .option("--raw", "Print raw query_range diagnostics.")
     .action(async (options: ServicesListOptions) => {
       const result = await runServicesList(options);
 
       if (!result.ok) {
-        writeFailure(result, options.json === true);
+        writeFailure(result, options.json === true && options.raw !== true);
         process.exitCode = 1;
       }
     });
@@ -99,15 +103,29 @@ async function runServicesList(
   options: ServicesListOptions,
 ): Promise<{ ok: true } | ServicesFailure> {
   try {
+    if (options.json === true && options.raw === true) {
+      return invalidOptionsFailure("list", "Cannot combine --json and --raw");
+    }
+
     const config = loadConfig();
     const client = new SigNozClient(config);
-    const response = await client.postJson(
-      queryRangeEndpoint,
-      buildServicesListQueryRange({
-        since: options.since,
-        limit: rawTraceLimit(options.limit),
-      }),
-    );
+    const requestPayload = buildServicesListQueryRange({
+      since: options.since,
+      limit: rawTraceLimit(options.limit),
+    });
+    const response = await client.postJson(queryRangeEndpoint, requestPayload);
+
+    if (options.raw === true) {
+      process.stdout.write(
+        formatRawQueryRangeDiagnostic({
+          command: "services list",
+          endpoint: queryRangeEndpoint,
+          request: requestPayload,
+          response,
+        }),
+      );
+      return { ok: true };
+    }
 
     if (!response.ok) {
       return signozFailure("list", response);
@@ -171,6 +189,18 @@ function parseLimit(value: string): number {
 
 function rawTraceLimit(serviceLimit: number): number {
   return serviceLimit * rawRowsPerService;
+}
+
+function invalidOptionsFailure(
+  command: ServicesFailure["command"],
+  message: string,
+): ServicesFailure {
+  return {
+    ok: false,
+    command,
+    code: "invalid_options",
+    message,
+  };
 }
 
 function signozFailure(
@@ -258,6 +288,8 @@ function formatFailure(result: ServicesFailure): string {
   switch (result.code) {
     case "missing_selection":
       return "error no selected service; run signoz-agent services select <service-name>";
+    case "invalid_options":
+      return `error ${result.message}`;
     case "missing_config":
       return `error missing ${formatMissingVariables(result.missingVariables)}`;
     case "invalid_config":

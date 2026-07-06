@@ -262,6 +262,86 @@ describe("traces search command", () => {
     );
   });
 
+  it("prints raw query_range diagnostics without replacing JSON output", async () => {
+    await withFakeSigNoz(
+      rawRows([
+        traceRow({
+          traceId: "raw-trace",
+          statusCode: 200,
+          method: "GET",
+          route: "/health",
+          durationNano: 1_000_000,
+        }),
+      ]),
+      async ({ url }) => {
+        const result = await runCli(
+          ["traces", "search", "--service", "barry", "--raw"],
+          cliEnv({ SIGNOZ_API_URL: url, SIGNOZ_API_KEY: "test-secret" }),
+        );
+
+        expect(result.exitCode).toBe(0);
+        expect(result.stderr).toBe("");
+
+        const parsed = JSON.parse(result.stdout) as {
+          ok: boolean;
+          command: string;
+          endpoint: string;
+          request: {
+            compositeQuery?: {
+              queries?: Array<{ spec?: { filter?: { expression?: string } } }>;
+            };
+          };
+          httpStatus: number;
+          responseShape: {
+            status: string;
+            data: { type: string };
+            resultSetCount: number;
+            rowCount: number;
+            firstRowKeys: string[];
+          };
+        };
+
+        expect(parsed).toMatchObject({
+          ok: true,
+          command: "traces search",
+          endpoint: "/api/v5/query_range",
+          httpStatus: 200,
+          responseShape: {
+            status: "success",
+            data: { type: "raw" },
+            resultSetCount: 1,
+            rowCount: 1,
+          },
+        });
+        expect(
+          parsed.request.compositeQuery?.queries?.[0]?.spec?.filter?.expression,
+        ).toBe("service.name = 'barry'");
+        expect(parsed.responseShape.firstRowKeys).toEqual([
+          "data",
+          "duration_nano",
+          "trace_id",
+        ]);
+      },
+    );
+  });
+
+  it("rejects combining JSON and raw diagnostics", async () => {
+    const result = await runCli([
+      "traces",
+      "search",
+      "--service",
+      "barry",
+      "--json",
+      "--raw",
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe("error Cannot combine --json and --raw\n");
+
+    await rm(result.cwd, { recursive: true, force: true });
+  });
+
   it("searches traces by direct SigNoz filter without requiring service", async () => {
     await withFakeSigNoz(rawRows([]), async ({ requests, url }) => {
       const result = await runCli(

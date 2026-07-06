@@ -153,6 +153,87 @@ describe("services command", () => {
     );
   });
 
+  it("prints raw query_range diagnostics without summarizing services", async () => {
+    await withFakeSigNoz(
+      rawRows([
+        traceRow({
+          traceId: "trace-one",
+          serviceName: "control-tower-api",
+          statusCode: 200,
+          timestamp: "2026-07-06T07:00:00Z",
+        }),
+      ]),
+      async ({ url }) => {
+        const result = await runCli(
+          ["services", "list", "--since", "2h", "--limit", "3", "--raw"],
+          cliEnv({ SIGNOZ_API_URL: url, SIGNOZ_API_KEY: "test-secret" }),
+        );
+
+        expect(result.exitCode).toBe(0);
+        expect(result.stderr).toBe("");
+
+        const parsed = JSON.parse(result.stdout) as {
+          ok: boolean;
+          command: string;
+          endpoint: string;
+          request: {
+            compositeQuery?: {
+              queries?: Array<{
+                spec?: { filter?: { expression?: string }; limit?: number };
+              }>;
+            };
+          };
+          httpStatus: number;
+          responseShape: {
+            status: string;
+            data: { type: string };
+            resultSetCount: number;
+            rowCount: number;
+            firstRowKeys: string[];
+          };
+          services?: unknown;
+        };
+
+        expect(parsed).toMatchObject({
+          ok: true,
+          command: "services list",
+          endpoint: "/api/v5/query_range",
+          httpStatus: 200,
+          responseShape: {
+            status: "success",
+            data: { type: "raw" },
+            resultSetCount: 1,
+            rowCount: 1,
+          },
+        });
+        expect(
+          parsed.request.compositeQuery?.queries?.[0]?.spec?.filter?.expression,
+        ).toBe("service.name != ''");
+        expect(parsed.request.compositeQuery?.queries?.[0]?.spec?.limit).toBe(
+          60,
+        );
+        expect(parsed.responseShape.firstRowKeys).toEqual([
+          "data",
+          "timestamp",
+          "trace_id",
+        ]);
+        expect(parsed.services).toBeUndefined();
+
+        await rm(result.cwd, { recursive: true, force: true });
+      },
+    );
+  });
+
+  it("rejects combining JSON and raw diagnostics", async () => {
+    const result = await runCli(["services", "list", "--json", "--raw"]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe("error Cannot combine --json and --raw\n");
+
+    await rm(result.cwd, { recursive: true, force: true });
+  });
+
   it("stores and prints the selected service by name", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "signoz-agent-test-"));
 

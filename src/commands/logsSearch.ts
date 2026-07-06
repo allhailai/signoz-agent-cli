@@ -2,6 +2,7 @@ import { Command, InvalidArgumentError } from "commander";
 
 import { ConfigError, loadConfig } from "../config.js";
 import { formatLogsSearchJson } from "../output/json.js";
+import { formatRawQueryRangeDiagnostic } from "../output/raw.js";
 import { formatLogsSearchText } from "../output/text.js";
 import { readSelectedService, writeLogRefs } from "../session/refStore.js";
 import {
@@ -22,6 +23,7 @@ type LogsSearchOptions = {
   since: string;
   limit: number;
   json?: boolean;
+  raw?: boolean;
 };
 
 type ResolvedLogsSearchOptions = {
@@ -64,11 +66,12 @@ export function registerLogsSearchCommand(program: Command): void {
     .option("--since <duration>", "Relative time window.", defaultSince)
     .option("--limit <n>", "Maximum rows to return.", parseLimit, defaultLimit)
     .option("--json", "Print structured JSON output.")
+    .option("--raw", "Print raw query_range diagnostics.")
     .action(async (options: LogsSearchOptions) => {
       const result = await runLogsSearch(options);
 
       if (!result.ok) {
-        writeFailure(result, options.json === true);
+        writeFailure(result, options.json === true && options.raw !== true);
         process.exitCode = 1;
       }
     });
@@ -78,6 +81,14 @@ async function runLogsSearch(
   options: LogsSearchOptions,
 ): Promise<{ ok: true } | LogsSearchFailure> {
   try {
+    if (options.json === true && options.raw === true) {
+      return {
+        ok: false,
+        code: "invalid_options",
+        message: "Cannot combine --json and --raw",
+      };
+    }
+
     const resolvedOptions = await resolveLogsSearchOptions(options);
 
     if (!resolvedOptions.ok) {
@@ -86,10 +97,20 @@ async function runLogsSearch(
 
     const config = loadConfig();
     const client = new SigNozClient(config);
-    const response = await client.postJson(
-      queryRangeEndpoint,
-      buildLogsSearchQueryRange(resolvedOptions.options),
-    );
+    const requestPayload = buildLogsSearchQueryRange(resolvedOptions.options);
+    const response = await client.postJson(queryRangeEndpoint, requestPayload);
+
+    if (options.raw === true) {
+      process.stdout.write(
+        formatRawQueryRangeDiagnostic({
+          command: "logs search",
+          endpoint: queryRangeEndpoint,
+          request: requestPayload,
+          response,
+        }),
+      );
+      return { ok: true };
+    }
 
     if (!response.ok) {
       return signozFailure(response);

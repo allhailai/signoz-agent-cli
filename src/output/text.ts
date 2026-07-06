@@ -104,6 +104,19 @@ export function formatTraceLogsText(
 ): string {
   const lines = [`${logs.length} logs for trace=${shortTraceId(traceId)}`];
 
+  if (logs.length === 0) {
+    lines.push(
+      "",
+      `No logs with trace_id matched this trace in the selected time window.`,
+      "The service may emit related logs without trace correlation.",
+      "",
+      "Next:",
+      `- signoz-agent logs search --filter "trace_id = '${traceId}'"`,
+      `- signoz-agent logs search --contains "<known task id or message>"`,
+      `- signoz-agent trace inspect ${shellToken(traceId)} --json`,
+    );
+  }
+
   for (const log of logs) {
     const timestamp = log.timestamp ?? "time=?";
     const level = log.level ?? "level=?";
