@@ -1,5 +1,5 @@
 {
-  "name": "signoz-agent-cli",
+  "name": "@allhailai/signoz-agent",
   "version": "0.1.0",
   "description": "Agent-first CLI for investigating SigNoz traces and logs.",
   "type": "module",
@@ -10,28 +10,37 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && chmod +x dist/cli.js",
+    "build": "npm run clean && tsc -p tsconfig.build.json && chmod +x dist/cli.js",
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "dev": "tsx src/cli.ts",
     "format:check": "prettier --check .",
     "lint": "eslint .",
+    "prepack": "npm run build",
     "test": "npm run build && vitest run",
     "type-check": "tsc --noEmit"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/aviatorcare/signoz-agent-cli.git"
+    "url": "git+https://github.com/allhailai/signoz-agent-cli.git"
   },
   "keywords": [
     "signoz",
     "observability",
     "cli"
   ],
-  "author": "",
+  "author": "All Hail AI",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/aviatorcare/signoz-agent-cli/issues"
+    "url": "https://github.com/allhailai/signoz-agent-cli/issues"
   },
-  "homepage": "https://github.com/aviatorcare/signoz-agent-cli#readme",
+  "homepage": "https://github.com/allhailai/signoz-agent-cli#readme",
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "dependencies": {
     "commander": "^15.0.0"
   },

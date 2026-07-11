@@ -2,25 +2,25 @@
 
 Agent-first CLI for discovering SigNoz services, selecting a service, and searching traces/logs.
 
-## Setup
+## Installation
 
-Install dependencies and build the local CLI:
+Install globally:
+
+```bash
+npm install --global @allhailai/signoz-agent
+signoz-agent --help
+```
+
+Or run a command without installing:
+
+```bash
+npx @allhailai/signoz-agent doctor
+```
+
+For local development:
 
 ```bash
 npm install
-npm run build
-```
-
-For local development, run commands through the TypeScript entrypoint:
-
-```bash
-npm run dev -- doctor
-npm run dev -- services list --since 2h
-```
-
-To try the compiled command locally:
-
-```bash
 npm run build
 npm link
 signoz-agent doctor
@@ -50,11 +50,11 @@ Run `doctor` first to verify configuration, authentication, and API reachability
 signoz-agent doctor
 ```
 
-Primary Control Tower API workflow: discover recent services, select the API service, then search traces and logs without repeating `--service`:
+Discover recent services, select one, then search traces and logs without repeating `--service`:
 
 ```bash
 signoz-agent services list --since 2h
-signoz-agent services select control-tower-api
+signoz-agent services select checkout-api
 signoz-agent traces search --since 30m
 signoz-agent logs search --contains "timeout" --since 30m
 ```
@@ -69,37 +69,18 @@ signoz-agent trace logs @t1
 Use direct SigNoz filter expressions when the relevant attribute is known:
 
 ```bash
-signoz-agent traces search --filter "barry.agent_run_id = '4'" --since 2h
-signoz-agent logs search --filter "barry.agent_run_id = '4'" --since 2h
+signoz-agent traces search --filter "deployment.environment = 'production'" --since 2h
+signoz-agent logs search --filter "request.id = 'abc123'" --since 2h
 ```
 
 Use log body search for snippets, task IDs, or messages:
 
 ```bash
-signoz-agent logs search --contains "hello world" --since 2h
-signoz-agent logs search --contains "8dbe9558fe874905a8458d3ac068ed60" --raw
+signoz-agent logs search --contains "connection timeout" --since 2h
+signoz-agent logs search --contains "abc123" --raw
 ```
 
 Add `--json` when an agent or script needs parsed output. Add `--raw` when debugging SigNoz query construction; it prints the request payload and compact response shape, not parsed rows.
-
-## Secondary Workflows
-
-Use this flow when debugging Barry webhook failures in SigNoz:
-
-```bash
-signoz-agent doctor
-signoz-agent traces search --service barry --route "/webhooks/signoz" --status ">=400" --since 30m
-signoz-agent trace inspect @t1
-signoz-agent trace logs @t1
-```
-
-For Barry/OpenCode smoke work, attribute and body searches can find logs that are not trace-correlated:
-
-```bash
-signoz-agent traces search --filter "barry.agent_run_id = '4'" --since 2h
-signoz-agent logs search --filter "barry.agent_run_id = '4'" --since 2h
-signoz-agent logs search --contains "hello world" --since 2h
-```
 
 If a ref is missing, rerun the search that created it or pass the full trace ID.
 

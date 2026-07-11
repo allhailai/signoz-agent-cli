@@ -5,16 +5,14 @@ description: Use the SigNoz agent CLI to discover services, select a service, se
 
 # SigNoz Agent CLI
 
-Use this skill when investigating SigNoz telemetry with `/workspace/signoz-agent-cli`.
+Use this skill when investigating SigNoz telemetry with the `signoz-agent` command.
 
 ## Quick Start
-
-Work from `/workspace/signoz-agent-cli` and use only the implemented commands:
 
 ```bash
 signoz-agent doctor
 signoz-agent services list --since 2h
-signoz-agent services select control-tower-api
+signoz-agent services select checkout-api
 signoz-agent traces search --since 30m
 signoz-agent logs search --contains "timeout" --since 30m
 signoz-agent trace inspect @t1
@@ -31,7 +29,7 @@ Use the selected service for normal trace/log exploration:
 
 ```bash
 signoz-agent services list --since 2h
-signoz-agent services select control-tower-api
+signoz-agent services select checkout-api
 signoz-agent traces search --since 30m
 signoz-agent logs search --contains "timeout" --since 30m
 ```
@@ -39,23 +37,22 @@ signoz-agent logs search --contains "timeout" --since 30m
 Use direct filters for known attributes:
 
 ```bash
-signoz-agent traces search --filter "barry.agent_run_id = '4'" --since 2h
-signoz-agent logs search --filter "barry.agent_run_id = '4'" --since 2h
+signoz-agent traces search --filter "deployment.environment = 'production'" --since 2h
+signoz-agent logs search --filter "request.id = 'abc123'" --since 2h
 ```
 
 Use contains search for log body snippets:
 
 ```bash
-signoz-agent logs search --contains "hello world" --since 2h
+signoz-agent logs search --contains "connection timeout" --since 2h
 ```
 
 Use `--json` for parsed output. Use `--raw` for query diagnostics when SigNoz results are surprising:
 
 ```bash
-signoz-agent logs search --contains "8dbe9558fe874905a8458d3ac068ed60" --raw
+signoz-agent logs search --contains "abc123" --raw
 ```
 
 ## References
 
-- For Control Tower API debugging, read [references/control-tower-debugging.md](references/control-tower-debugging.md).
-- For secondary Barry webhook debugging, read [references/barry-debugging.md](references/barry-debugging.md).
+- For a complete investigation workflow, read [references/service-investigation.md](references/service-investigation.md).
