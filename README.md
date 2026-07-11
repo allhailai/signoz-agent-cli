@@ -7,14 +7,14 @@ Agent-first CLI for discovering SigNoz services, selecting a service, and search
 Install globally:
 
 ```bash
-npm install --global @allhailai/signoz-agent
+npm install --global @allhail/signoz-agent
 signoz-agent --help
 ```
 
 Or run a command without installing:
 
 ```bash
-npx @allhailai/signoz-agent doctor
+npx @allhail/signoz-agent doctor
 ```
 
 For local development:

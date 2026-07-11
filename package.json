@@ -1,5 +1,5 @@
 {
-  "name": "@allhailai/signoz-agent",
+  "name": "@allhail/signoz-agent",
   "version": "0.1.0",
   "description": "Agent-first CLI for investigating SigNoz traces and logs.",
   "type": "module",
