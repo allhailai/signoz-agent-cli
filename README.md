@@ -116,10 +116,11 @@ Complete the first successful OIDC publication within two days of creating the
 trusted publisher.
 
 For each later release, update `package.json`, `package-lock.json`, and the CLI's
-version in `src/cli.ts`, then commit and push to `main`. Publish a GitHub release
-with a matching `v<version>` tag, or manually run **Publish npm package** on
-`main`. The workflow checks formatting, types, lint, and tests before publishing
-with provenance.
+version in `src/cli.ts`, then merge to `main`. Every push to `main` runs **Publish
+npm package**. The workflow checks formatting, types, lint, and tests before
+publishing with provenance. You can also run it manually on `main`.
 
-Every publication needs a new version. After the initial `0.1.1` publication,
-use a later version to verify the GitHub Actions workflow.
+The workflow publishes the committed version and skips publication when that
+version is already on npm. Authentication, build, and other publication errors
+fail the workflow. Use a new version when a merge should publish a new package;
+the workflow does not change versions automatically.
