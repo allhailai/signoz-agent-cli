@@ -7,14 +7,14 @@ Agent-first CLI for discovering SigNoz services, selecting a service, and search
 Install globally:
 
 ```bash
-npm install --global @allhail/signoz-agent
+npm install --global @allhailai/signoz-agent
 signoz-agent --help
 ```
 
 Or run a command without installing:
 
 ```bash
-npx @allhail/signoz-agent doctor
+npx @allhailai/signoz-agent doctor
 ```
 
 For local development:
@@ -94,3 +94,32 @@ npm run type-check
 npm run lint
 npm run test
 ```
+
+## Publishing
+
+The package is public under `@allhailai/signoz-agent`. GitHub Actions publishes
+through npm trusted publishing, without a stored npm write token.
+
+For the first publication under this scope, authenticate as an npm maintainer
+with publication permission and run `npm publish` from the checkout. The package
+must exist before npm lets you configure a trusted publisher.
+
+In the package's npm settings, add a GitHub Actions trusted publisher for
+organization `allhailai`, repository `signoz-agent-cli`, and workflow file
+`publish.yml`. Leave the environment field empty and enable **Allow npm publish**
+for direct publication. This setup requires an authenticated npm account with
+package write access and 2FA; a token that bypasses 2FA cannot configure trust.
+
+See [npm's setup requirements](https://docs.npmjs.com/cli/v11/commands/npm-trust/)
+and [trusted publishing guide](https://docs.npmjs.com/trusted-publishers/).
+Complete the first successful OIDC publication within two days of creating the
+trusted publisher.
+
+For each later release, update `package.json`, `package-lock.json`, and the CLI's
+version in `src/cli.ts`, then commit and push to `main`. Publish a GitHub release
+with a matching `v<version>` tag, or manually run **Publish npm package** on
+`main`. The workflow checks formatting, types, lint, and tests before publishing
+with provenance.
+
+Every publication needs a new version. After the initial `0.1.1` publication,
+use a later version to verify the GitHub Actions workflow.

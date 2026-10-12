@@ -1,10 +1,10 @@
 {
-  "name": "@allhail/signoz-agent",
+  "name": "@allhailai/signoz-agent",
   "version": "0.1.1",
   "description": "Agent-first CLI for investigating SigNoz traces and logs.",
   "type": "module",
   "bin": {
-    "signoz-agent": "./dist/cli.js"
+    "signoz-agent": "dist/cli.js"
   },
   "files": [
     "dist"
