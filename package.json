@@ -1,7 +1,7 @@
 {
   "name": "@allhailai/signoz-agent",
-  "version": "0.1.2",
-  "description": "Agent-first CLI for investigating SigNoz traces and logs.",
+  "version": "0.2.0",
+  "description": "Agent-first CLI for investigating SigNoz traces, logs, and alert rules.",
   "type": "module",
   "bin": {
     "signoz-agent": "dist/cli.js"
