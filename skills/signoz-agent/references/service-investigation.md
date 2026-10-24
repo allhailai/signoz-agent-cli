@@ -46,6 +46,17 @@ signoz-agent logs search --contains "connection timeout" --since 2h
 signoz-agent logs search --contains "abc123" --raw
 ```
 
+## Alert Investigation
+
+If the investigation starts from an alert, inspect the saved rule as well as its matching telemetry:
+
+```bash
+signoz-agent alerts list --json
+signoz-agent alerts inspect <rule-id> --json
+```
+
+Compare the rule's query filters, aggregation, selected query, thresholds, and evaluation window with the trace or log evidence. A rule can be inactive by the time it is inspected. A trace URL does not identify which rule sent a notification.
+
 ## Reporting Findings
 
 Report whether `doctor` passed, the selected service, trace or log refs inspected, key errors or latency signals, and uncertainty such as empty correlated logs.

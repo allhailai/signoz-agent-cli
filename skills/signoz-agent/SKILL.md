@@ -1,11 +1,11 @@
 ---
 name: signoz-agent
-description: Use the SigNoz agent CLI to discover services, select a service, search traces/logs, inspect traces, and retrieve correlated logs with signoz-agent-cli.
+description: Use signoz-agent to investigate SigNoz traces, logs, and alert definitions, or apply requested alert rule changes.
 ---
 
 # SigNoz Agent CLI
 
-Use this skill when investigating SigNoz telemetry with the `signoz-agent` command.
+Use this skill when investigating SigNoz telemetry or managing alert rules with the `signoz-agent` command.
 
 ## Quick Start
 
@@ -52,6 +52,28 @@ Use `--json` for parsed output. Use `--raw` for query diagnostics when SigNoz re
 ```bash
 signoz-agent logs search --contains "abc123" --raw
 ```
+
+## Alert rules
+
+Read saved rule definitions when investigating why telemetry triggers an alert:
+
+```bash
+signoz-agent alerts list --json
+signoz-agent alerts inspect <rule-id> --json
+```
+
+Lists include inactive and disabled rules and are independent of the selected service. Follow `nextOffset` with `--offset` to read further pages. Inspection returns the full definition under `rule`, including the query, thresholds, and evaluation and notification settings.
+
+For requested alert changes, prepare a partial rule JSON file and preview it:
+
+```bash
+signoz-agent alerts update <rule-id> --patch-file change.json --dry-run --json
+signoz-agent alerts update <rule-id> --patch-file change.json --json
+```
+
+Nested objects merge with the current definition, but arrays replace the entire stored array. Include all queries, thresholds, and channels that the change must retain. Use `--patch-file -` for JSON from stdin. Supply writable rule fields directly, without the inspection envelope or audit fields.
+
+A dry run shows requested changes without writing or server validation. An update requires edit access and reads back the saved rule to verify it. If an update is unconfirmed or verification fails, inspect the rule before deciding whether another write is necessary. An investigation alone does not authorize alert changes.
 
 ## References
 

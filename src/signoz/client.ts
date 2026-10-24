@@ -26,17 +26,33 @@ export class SigNozClient {
   }
 
   async postJson(path: string, body: unknown): Promise<SigNozResponse> {
+    return this.requestJson("POST", path, body);
+  }
+
+  async getJson(path: string): Promise<SigNozResponse> {
+    return this.requestJson("GET", path);
+  }
+
+  async patchJson(path: string, body: unknown): Promise<SigNozResponse> {
+    return this.requestJson("PATCH", path, body);
+  }
+
+  private async requestJson(
+    method: "GET" | "POST" | "PATCH",
+    path: string,
+    body?: unknown,
+  ): Promise<SigNozResponse> {
     const url = this.buildUrl(path);
     let response: Response;
 
     try {
       response = await this.fetchImpl(url, {
-        method: "POST",
+        method,
         headers: {
           "content-type": "application/json",
           "SIGNOZ-API-KEY": this.config.apiKey,
         },
-        body: JSON.stringify(body),
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       });
     } catch {
       throw new SigNozNetworkError("Unable to reach SigNoz API");

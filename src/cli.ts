@@ -4,21 +4,25 @@ import { fileURLToPath } from "node:url";
 
 import { Command } from "commander";
 
+import { registerAlertsCommand } from "./commands/alerts.js";
 import { registerDoctorCommand } from "./commands/doctor.js";
 import { registerLogsSearchCommand } from "./commands/logsSearch.js";
 import { registerServicesCommand } from "./commands/services.js";
 import { registerTraceCommand } from "./commands/trace.js";
 import { registerTracesSearchCommand } from "./commands/tracesSearch.js";
 
-const version = "0.1.2";
+const version = "0.2.0";
 
 export function createProgram(): Command {
   const program = new Command()
     .name("signoz-agent")
-    .description("Agent-first CLI for investigating SigNoz traces and logs.")
+    .description(
+      "Agent-first CLI for investigating SigNoz traces, logs, and alert rules.",
+    )
     .version(version)
     .showHelpAfterError();
 
+  registerAlertsCommand(program);
   registerDoctorCommand(program);
   registerLogsSearchCommand(program);
   registerServicesCommand(program);

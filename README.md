@@ -1,6 +1,6 @@
 # signoz-agent-cli
 
-Agent-first CLI for discovering SigNoz services, selecting a service, and searching traces/logs.
+Agent-first CLI for discovering SigNoz services, searching traces/logs, and inspecting and updating alert rules.
 
 ## Installation
 
@@ -83,6 +83,47 @@ signoz-agent logs search --contains "abc123" --raw
 Add `--json` when an agent or script needs parsed output. Add `--raw` when debugging SigNoz query construction; it prints the request payload and compact response shape, not parsed rows.
 
 If a ref is missing, rerun the search that created it or pass the full trace ID.
+
+## Alert rules
+
+List configured alert rules, including inactive and disabled rules, then inspect a rule's full definition:
+
+```bash
+signoz-agent alerts list
+signoz-agent alerts list --limit 20 --offset 20 --json
+signoz-agent alerts inspect <rule-id> --json
+```
+
+Rules are listed across services, independently of the selected service and telemetry time windows. JSON lists include `count`, `total`, `nextOffset` (null on the last page), and `rules`. Inspection returns `{ "ok": true, "rule": { ... } }`, preserving all definition fields. Text inspection prints the full definition as indented JSON.
+
+Listing requires `GET /api/v3/rules`. Inspection and updates use `/api/v2/rules/{id}`. See the [SigNoz rule API migration guide](https://signoz.io/docs/alerts-management/migrate-alert-rules-schema-v1-to-v2alpha1/).
+
+To change a rule, supply a JSON object containing the writable fields to update:
+
+```json
+{
+  "description": "Counts unexpected production error traces."
+}
+```
+
+```bash
+signoz-agent alerts update <rule-id> --patch-file change.json --dry-run
+signoz-agent alerts update <rule-id> --patch-file change.json --json
+cat change.json | signoz-agent alerts update <rule-id> --patch-file - --dry-run --json
+```
+
+The command fetches the current definition and merges nested objects before sending a partial update with `PATCH`. **Arrays replace the entire stored array.** When editing a query filter, include every query to retain in `condition.compositeQuery.queries`; the same applies to threshold and channel arrays. To prepare a query edit from the inspected definition:
+
+```bash
+signoz-agent alerts inspect <rule-id> --json > rule.json
+jq '{condition: .rule.condition}' rule.json > change.json
+# Edit the desired query in change.json and retain its sibling queries.
+signoz-agent alerts update <rule-id> --patch-file change.json --dry-run
+```
+
+A dry run returns the fetched `rule` and a `changes` list with JSON Pointer paths and before/after values. It sends no write and does not validate the patch with the server. It reports `dryRun: true` and `verified: false`.
+
+An update reads the rule back, checks the requested values, and returns the saved definition with `verified: true`. Equivalent duration strings such as `5m` and `5m0s` compare equally. A patch that already matches the rule sends no write. Failed or uncertain updates exit nonzero and are not retried automatically; inspect the rule before retrying an unconfirmed update. Updates require an API key with edit access. The command does not send test notifications.
 
 ## Validation
 
