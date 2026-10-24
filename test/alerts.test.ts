@@ -148,48 +148,8 @@ describe("alert rules commands", () => {
     );
   });
 
-  it.each([404, 405])(
-    "uses the legacy list only when v3 is unavailable (%s)",
-    async (status) => {
-      await withFakeSigNoz(
-        (request) =>
-          request.url?.includes("/v3/")
-            ? { status }
-            : success([
-                ruleFixture(),
-                { ...ruleFixture(), id: "disabled-rule", disabled: true },
-              ]),
-        async ({ url, requests }) => {
-          const result = await runCli(url, [
-            "alerts",
-            "list",
-            "--limit",
-            "1",
-            "--offset",
-            "1",
-            "--json",
-          ]);
-          expect(result.exitCode).toBe(0);
-          expect(JSON.parse(result.stdout)).toMatchObject({
-            count: 1,
-            total: 2,
-            nextOffset: null,
-            rules: [{ id: "disabled-rule", disabled: true }],
-          });
-          expect(JSON.parse(result.stdout).rules[0]).not.toHaveProperty(
-            "condition",
-          );
-          expect(requests.map((request) => request.url)).toEqual([
-            "/signoz/api/v3/rules?limit=1&offset=1",
-            "/signoz/api/v2/rules",
-          ]);
-        },
-      );
-    },
-  );
-
-  it.each([401, 403, 500, 200])(
-    "reports failed or malformed v3 responses without fallback or credential exposure (%s)",
+  it.each([401, 403, 404, 405, 500, 200])(
+    "reports failed or malformed v3 responses without extra requests or credential exposure (%s)",
     async (status) => {
       await withFakeSigNoz(
         () => ({ status, body: { status: "error", message: "test-secret" } }),

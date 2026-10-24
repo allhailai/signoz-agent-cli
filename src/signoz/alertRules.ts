@@ -54,20 +54,13 @@ export async function listAlertRules(
   client: SigNozClient,
   query: AlertRulesPage["query"],
 ): Promise<AlertRulesPage> {
-  let endpoint = `/api/v3/rules?limit=${query.limit}&offset=${query.offset}`;
-  let response = await client.getJson(endpoint);
-  let legacy = false;
-
-  if (response.status === 404 || response.status === 405) {
-    endpoint = "/api/v2/rules";
-    response = await client.getJson(endpoint);
-    legacy = true;
-  }
+  const endpoint = `/api/v3/rules?limit=${query.limit}&offset=${query.offset}`;
+  const response = await client.getJson(endpoint);
 
   const data = responseData(response, endpoint);
   const page = asRecord(data);
-  const rows: unknown = legacy ? data : page?.rules;
-  const total = legacy && Array.isArray(rows) ? rows.length : page?.total;
+  const rows: unknown = page?.rules;
+  const total = page?.total;
 
   if (
     !Array.isArray(rows) ||
@@ -79,9 +72,7 @@ export async function listAlertRules(
     throw unexpectedResponse(endpoint);
   }
 
-  const rules = (
-    legacy ? rows.slice(query.offset, query.offset + query.limit) : rows
-  ).map(summarizeRule);
+  const rules = rows.map(summarizeRule);
   const nextOffset = query.offset + rules.length;
 
   return {

@@ -96,7 +96,7 @@ signoz-agent alerts inspect <rule-id> --json
 
 Rules are listed across services, independently of the selected service and telemetry time windows. JSON lists include `count`, `total`, `nextOffset` (null on the last page), and `rules`. Inspection returns `{ "ok": true, "rule": { ... } }`, preserving all definition fields. Text inspection prints the full definition as indented JSON.
 
-Listing uses `GET /api/v3/rules`. Deployments returning 404 or 405 for that route use `GET /api/v2/rules` with local pagination. Inspection and updates use `/api/v2/rules/{id}`. Authentication failures and malformed responses do not trigger a fallback. See the [SigNoz rule API migration guide](https://signoz.io/docs/alerts-management/migrate-alert-rules-schema-v1-to-v2alpha1/).
+Listing requires `GET /api/v3/rules`. Inspection and updates use `/api/v2/rules/{id}`. See the [SigNoz rule API migration guide](https://signoz.io/docs/alerts-management/migrate-alert-rules-schema-v1-to-v2alpha1/).
 
 To change a rule, supply a JSON object containing the writable fields to update:
 
