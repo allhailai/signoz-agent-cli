@@ -62,7 +62,7 @@ signoz-agent alerts list --json
 signoz-agent alerts inspect <rule-id> --json
 ```
 
-Lists include inactive and disabled rules and are independent of the selected service. Follow `nextOffset` with `--offset` to read further pages. Inspection returns the full definition under `rule`, including the query, thresholds, and evaluation and notification settings.
+Lists include inactive and disabled rules and are independent of the selected service. The CLI probes the server version without authentication: below v0.144.0 it fetches `/api/v2/rules` and pages locally; v0.144.0 and later use `/api/v3/rules`. An unknown or unparseable version selects v3. `doctor` reports `version`, `rulesListApi`, and `versionProbe` in text and JSON; a failed version probe is nonfatal on its own. Follow `nextOffset` with `--offset` to read further pages. Inspection returns the full definition under `rule`, including the query, thresholds, and evaluation and notification settings.
 
 For requested alert changes, prepare a partial rule JSON file and preview it:
 

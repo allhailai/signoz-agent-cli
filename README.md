@@ -44,7 +44,7 @@ export SIGNOZ_API_KEY="<your-signoz-api-key>"
 
 ## Commands
 
-Run `doctor` first to verify configuration, authentication, and API reachability:
+Run `doctor` first to verify configuration, authentication, and API reachability, and report the server version and rules list API tier (`v2` or `v3`). A failed version probe reports `version=unknown` (`null` in JSON) and its `versionProbe` status without failing an otherwise healthy check:
 
 ```bash
 signoz-agent doctor
@@ -96,7 +96,7 @@ signoz-agent alerts inspect <rule-id> --json
 
 Rules are listed across services, independently of the selected service and telemetry time windows. JSON lists include `count`, `total`, `nextOffset` (null on the last page), and `rules`. Inspection returns `{ "ok": true, "rule": { ... } }`, preserving all definition fields. Text inspection prints the full definition as indented JSON.
 
-Listing requires `GET /api/v3/rules`. Inspection and updates use `/api/v2/rules/{id}`. See the [SigNoz rule API migration guide](https://signoz.io/docs/alerts-management/migrate-alert-rules-schema-v1-to-v2alpha1/).
+Listing probes `GET /api/v1/version` once per command without an API key. Servers below v0.144.0 use `GET /api/v2/rules`, fetching all rules and applying `--limit` and `--offset` locally; v0.144.0 and later use `GET /api/v3/rules` with server-side pagination. An unavailable or unparseable version selects v3. Both tiers return the same summaries and pagination fields. Inspection and updates use `/api/v2/rules/{id}`. See the [SigNoz rule API migration guide](https://signoz.io/docs/alerts-management/migrate-alert-rules-schema-v1-to-v2alpha1/).
 
 To change a rule, supply a JSON object containing the writable fields to update:
 

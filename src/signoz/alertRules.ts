@@ -1,6 +1,7 @@
 import { isDeepStrictEqual } from "node:util";
 
 import { SigNozClient, type SigNozResponse } from "./client.js";
+import { probeServerVersion } from "./serverVersion.js";
 
 export type AlertRule = Record<string, unknown> & {
   id: string;
@@ -54,13 +55,18 @@ export async function listAlertRules(
   client: SigNozClient,
   query: AlertRulesPage["query"],
 ): Promise<AlertRulesPage> {
-  const endpoint = `/api/v3/rules?limit=${query.limit}&offset=${query.offset}`;
+  const { rulesListApi } = await probeServerVersion(client);
+  const endpoint =
+    rulesListApi === "v2"
+      ? "/api/v2/rules"
+      : `/api/v3/rules?limit=${query.limit}&offset=${query.offset}`;
   const response = await client.getJson(endpoint);
 
   const data = responseData(response, endpoint);
   const page = asRecord(data);
-  const rows: unknown = page?.rules;
-  const total = page?.total;
+  const rows: unknown = rulesListApi === "v2" ? data : page?.rules;
+  const total =
+    rulesListApi === "v2" && Array.isArray(rows) ? rows.length : page?.total;
 
   if (
     !Array.isArray(rows) ||
@@ -72,7 +78,11 @@ export async function listAlertRules(
     throw unexpectedResponse(endpoint);
   }
 
-  const rules = rows.map(summarizeRule);
+  const rules = (
+    rulesListApi === "v2"
+      ? rows.slice(query.offset, query.offset + query.limit)
+      : rows
+  ).map(summarizeRule);
   const nextOffset = query.offset + rules.length;
 
   return {

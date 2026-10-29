@@ -13,7 +13,13 @@ type Request = {
   apiKey: string | string[] | undefined;
   body: Record<string, unknown>;
 };
-type Reply = { status?: number; body?: unknown; disconnect?: boolean };
+type Reply = {
+  status?: number;
+  body?: unknown;
+  disconnect?: boolean;
+  contentType?: string;
+  bodyText?: string;
+};
 type CliResult = { exitCode: number; stdout: string; stderr: string };
 
 const ruleId = "01900000-0000-7000-8000-000000000001";
@@ -97,6 +103,8 @@ describe("alert rules commands", () => {
     ];
     await withFakeSigNoz(
       (request) => {
+        if (request.url === "/signoz/api/v1/version")
+          return { body: { version: "v0.144.0" } };
         const url = new URL(request.url ?? "", "http://localhost");
         const offset = Number(url.searchParams.get("offset"));
         return success({ rules: rules.slice(offset, offset + 2), total: 3 });
@@ -138,7 +146,9 @@ describe("alert rules commands", () => {
             request.apiKey,
           ]),
         ).toEqual([
+          ["GET", "/signoz/api/v1/version", undefined],
           ["GET", "/signoz/api/v3/rules?limit=2&offset=0", "test-secret"],
+          ["GET", "/signoz/api/v1/version", undefined],
           ["GET", "/signoz/api/v3/rules?limit=2&offset=2", "test-secret"],
         ]);
         const text = await runCli(url, ["alerts", "list", "--limit", "2"]);
@@ -162,7 +172,202 @@ describe("alert rules commands", () => {
             code: status === 200 ? "unexpected_response" : "signoz_error",
           });
           expect(result.stderr).not.toContain("test-secret");
-          expect(requests).toHaveLength(1);
+          expect(requests.map((request) => request.url)).toEqual([
+            "/signoz/api/v1/version",
+            "/signoz/api/v3/rules?limit=20&offset=0",
+          ]);
+        },
+      );
+    },
+  );
+
+  it("pages v0.141.1 full rules locally and preserves summaries and text", async () => {
+    const fullRules = [
+      ruleFixture(),
+      { ...ruleFixture(), id: "disabled-rule", disabled: true },
+    ];
+    const rules = [
+      ...fullRules,
+      { id: "minimal-rule", alert: "No optional fields" },
+    ];
+    await withFakeSigNoz(
+      (request) => {
+        if (request.url === "/signoz/api/v1/version")
+          return {
+            body: { version: "v0.141.1", ee: "Y", setupCompleted: true },
+          };
+        if (request.url === "/signoz/api/v2/rules") return success(rules);
+        // Observed on v0.141.1: unsupported API routes serve the SPA with HTTP 200.
+        return {
+          status: 200,
+          contentType: "text/html; charset=utf-8",
+          bodyText: "<!doctype html><html>SigNoz</html>",
+        };
+      },
+      async ({ url, requests }) => {
+        for (const offset of [0, 2, 3, 10]) {
+          const result = await runCli(url, [
+            "alerts",
+            "list",
+            "--limit",
+            "2",
+            "--offset",
+            String(offset),
+            "--json",
+          ]);
+          expect(result.exitCode).toBe(0);
+          expect(result.stderr).toBe("");
+          const expectedRules =
+            offset === 0
+              ? fullRules.map(
+                  ({
+                    id,
+                    alert,
+                    state,
+                    disabled,
+                    alertType,
+                    ruleType,
+                    labels,
+                  }) => ({
+                    id,
+                    alert,
+                    state,
+                    disabled,
+                    alertType,
+                    ruleType,
+                    labels,
+                  }),
+                )
+              : rules.slice(offset);
+          expect(JSON.parse(result.stdout)).toEqual({
+            ok: true,
+            count: expectedRules.length,
+            total: 3,
+            nextOffset: offset === 0 ? 2 : null,
+            query: { limit: 2, offset },
+            rules: expectedRules,
+          });
+        }
+        const text = await runCli(url, ["alerts", "list", "--limit", "2"]);
+        expect(text.exitCode).toBe(0);
+        expect(text.stdout).toContain("2 alert rules total=3 offset=0");
+        expect(text.stdout).toContain(
+          'disabled-rule "Production error spans" state=inactive disabled=true',
+        );
+        expect(text.stdout).toContain("--offset 2");
+        expect(
+          requests.map(({ method, url, apiKey }) => [method, url, apiKey]),
+        ).toEqual(
+          Array.from({ length: 5 }, () => [
+            ["GET", "/signoz/api/v1/version", undefined],
+            ["GET", "/signoz/api/v2/rules", "test-secret"],
+          ]).flat(),
+        );
+      },
+    );
+  });
+
+  it.each([
+    ["0.143.9", "v2"],
+    ["v0.144.0-rc.1", "v2"],
+    ["0.144.0+build.1", "v3"],
+    ["v0.144.1", "v3"],
+    ["v0.150.0", "v3"],
+    ["v1.0.0", "v3"],
+    ["v0.141", "v3"],
+    ["v0.0141.1", "v3"],
+    ["v0.141.1-01", "v3"],
+    ["v0.141.1-garbage!", "v3"],
+    ["test-secret", "v3"],
+  ])(
+    "selects %s's %s list API using semantic versions",
+    async (version, tier) => {
+      await withFakeSigNoz(
+        (request) =>
+          request.url === "/signoz/api/v1/version"
+            ? { body: { version } }
+            : success(tier === "v2" ? [] : { rules: [], total: 0 }),
+        async ({ url, requests }) => {
+          const result = await runCli(url, ["alerts", "list", "--json"]);
+          expect(result.exitCode).toBe(0);
+          expect(JSON.parse(result.stdout)).toMatchObject({
+            count: 0,
+            total: 0,
+            nextOffset: null,
+            rules: [],
+          });
+          expect(requests.map((request) => request.url)).toEqual([
+            "/signoz/api/v1/version",
+            tier === "v2"
+              ? "/signoz/api/v2/rules"
+              : "/signoz/api/v3/rules?limit=20&offset=0",
+          ]);
+        },
+      );
+    },
+  );
+
+  it.each<Reply>([
+    {
+      status: 200,
+      contentType: "text/html",
+      bodyText: "<html>test-secret</html>",
+    },
+    { status: 404, body: { message: "test-secret" } },
+    { disconnect: true },
+  ])("attempts v3 when version discovery fails (%j)", async (versionReply) => {
+    await withFakeSigNoz(
+      (request) =>
+        request.url === "/signoz/api/v1/version"
+          ? versionReply
+          : {
+              status: 200,
+              contentType: "text/html",
+              bodyText: "<html>test-secret</html>",
+            },
+      async ({ url, requests }) => {
+        const result = await runCli(url, ["alerts", "list", "--json"]);
+        expect(result.exitCode).toBe(1);
+        expect(JSON.parse(result.stderr)).toEqual({
+          ok: false,
+          command: "alerts list",
+          code: "unexpected_response",
+          message: "SigNoz returned an unexpected alert rule response",
+          endpoint: "/api/v3/rules?limit=20&offset=0",
+        });
+        expect(requests.map((request) => request.url)).toEqual([
+          "/signoz/api/v1/version",
+          "/signoz/api/v3/rules?limit=20&offset=0",
+        ]);
+      },
+    );
+  });
+
+  it.each([401, 403, 404, 500, 200])(
+    "reports failed or malformed v2 responses (%s)",
+    async (status) => {
+      await withFakeSigNoz(
+        (request) =>
+          request.url === "/signoz/api/v1/version"
+            ? { body: { version: "v0.141.1" } }
+            : {
+                status,
+                body: { status: "success", data: { message: "test-secret" } },
+              },
+        async ({ url, requests }) => {
+          const result = await runCli(url, ["alerts", "list", "--json"]);
+          expect(result.exitCode).toBe(1);
+          expect(result.stdout).toBe("");
+          expect(JSON.parse(result.stderr)).toMatchObject({
+            ok: false,
+            code: status === 200 ? "unexpected_response" : "signoz_error",
+            endpoint: "/api/v2/rules",
+            ...(status === 200 ? {} : { httpStatus: status }),
+          });
+          expect(requests.map((request) => request.url)).toEqual([
+            "/signoz/api/v1/version",
+            "/signoz/api/v2/rules",
+          ]);
         },
       );
     },
@@ -445,7 +650,22 @@ function success(data: unknown): Reply {
   return { body: { status: "success", data } };
 }
 
-function runCli(url: string, args: string[], input = ""): Promise<CliResult> {
+async function runCli(
+  url: string,
+  args: string[],
+  input = "",
+): Promise<CliResult> {
+  const result = await runCliUnchecked(url, args, input);
+  expect(result.stdout).not.toContain("test-secret");
+  expect(result.stderr).not.toContain("test-secret");
+  return result;
+}
+
+function runCliUnchecked(
+  url: string,
+  args: string[],
+  input: string,
+): Promise<CliResult> {
   return new Promise((resolve) => {
     const child = execFile(
       process.execPath,
@@ -494,9 +714,9 @@ async function withFakeSigNoz(
         return;
       }
       response.writeHead(reply.status ?? 200, {
-        "content-type": "application/json",
+        "content-type": reply.contentType ?? "application/json",
       });
-      response.end(JSON.stringify(reply.body ?? {}));
+      response.end(reply.bodyText ?? JSON.stringify(reply.body ?? {}));
     });
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));

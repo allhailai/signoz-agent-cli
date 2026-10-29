@@ -6,6 +6,10 @@ import {
   SigNozNetworkError,
   type SigNozResponse,
 } from "../signoz/client.js";
+import {
+  probeServerVersion,
+  type ServerVersion,
+} from "../signoz/serverVersion.js";
 
 const queryRangePath = "/api/v5/query_range";
 const validationPayload = {};
@@ -36,12 +40,14 @@ type DoctorFailure = {
   missingVariables?: string[];
 };
 
-type DoctorResult = DoctorSuccess | DoctorFailure;
+type DoctorResult = (DoctorSuccess | DoctorFailure) & Partial<ServerVersion>;
 
 export function registerDoctorCommand(program: Command): void {
   program
     .command("doctor")
-    .description("Verify SigNoz config, auth, and API reachability.")
+    .description(
+      "Verify SigNoz config, auth, reachability, and server API tier.",
+    )
     .option("--json", "Print structured JSON output.")
     .action(async (options: DoctorJsonOption) => {
       const result = await runDoctor();
@@ -61,9 +67,14 @@ export async function runDoctor(
   try {
     const config = loadConfig(env);
     const client = new SigNozClient(config, fetchImpl);
-    const response = await client.postJson(queryRangePath, validationPayload);
+    const server = await probeServerVersion(client);
+    try {
+      const response = await client.postJson(queryRangePath, validationPayload);
 
-    return interpretDoctorResponse(config.apiUrl, response);
+      return { ...interpretDoctorResponse(config.apiUrl, response), ...server };
+    } catch (error) {
+      return { ...doctorFailureFromError(error), ...server };
+    }
   } catch (error) {
     return doctorFailureFromError(error);
   }
@@ -153,7 +164,11 @@ function writeDoctorResult(result: DoctorResult, json: boolean): void {
     return;
   }
 
-  const line = formatDoctorResult(result);
+  const server =
+    result.rulesListApi === undefined
+      ? ""
+      : ` version=${result.version ?? "unknown"} rulesListApi=${result.rulesListApi} versionProbe=${result.versionProbe}`;
+  const line = `${formatDoctorResult(result)}${server}`;
 
   if (result.ok) {
     process.stdout.write(`${line}\n`);

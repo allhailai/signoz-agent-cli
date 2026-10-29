@@ -11,7 +11,7 @@ import { registerServicesCommand } from "./commands/services.js";
 import { registerTraceCommand } from "./commands/trace.js";
 import { registerTracesSearchCommand } from "./commands/tracesSearch.js";
 
-const version = "0.2.0";
+const version = "0.2.1";
 
 export function createProgram(): Command {
   const program = new Command()
