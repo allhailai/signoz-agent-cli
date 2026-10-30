@@ -23,6 +23,8 @@ Trace searches assign refs such as `@t1`; log searches assign refs such as `@l1`
 
 The CLI requires `SIGNOZ_API_URL` and `SIGNOZ_API_KEY` in the environment. `.env` is local, ignored by git, and must not be printed or committed. Confirm env vars exist without exposing values.
 
+`alerts update` and `alerts apply` use `SIGNOZ_WRITE_API_KEY` for writes and test notifications when it is non-empty, otherwise `SIGNOZ_API_KEY`. Reads always use `SIGNOZ_API_KEY`. Reports identify the variable as `writeKeySource`, never print the key.
+
 ## Search Patterns
 
 Use the selected service for normal trace/log exploration:
@@ -74,6 +76,27 @@ signoz-agent alerts update <rule-id> --patch-file change.json --json
 Nested objects merge with the current definition, but arrays replace the entire stored array. Include all queries, thresholds, and channels that the change must retain. Use `--patch-file -` for JSON from stdin. Supply writable rule fields directly, without the inspection envelope or audit fields.
 
 A dry run shows requested changes without writing or server validation. An update requires edit access and reads back the saved rule to verify it. If an update is unconfirmed or verification fails, inspect the rule before deciding whether another write is necessary. An investigation alone does not authorize alert changes.
+
+### Apply complete definitions
+
+For requested creates or replacements, put one complete rule definition in each top-level `*.json` file. Files must have `schemaVersion: "v2alpha1"` and a non-empty `alert`, and omit `id`, `state`, `createdAt`, `createdBy`, `updatedAt`, and `updatedBy`. Include all condition, evaluation, and notification settings to retain: updates send the file as a full PUT replacement. Comparison checks supplied fields, including equivalent durations; clear optional values explicitly using empty or null values accepted by SigNoz.
+
+Export a file with the existing inspect command and `jq`:
+
+```bash
+mkdir -p ./rules
+signoz-agent alerts inspect <rule-id> --json \
+  | jq '.rule | del(.id, .state, .createdAt, .createdBy, .updatedAt, .updatedBy, .version, .source)' \
+  > ./rules/example.json
+signoz-agent alerts apply --dir ./rules --dry-run --json
+signoz-agent alerts apply --dir ./rules --json
+```
+
+An unchanged export is a no-op. Files are processed in filename order. Exact alert names determine `create`, `update`, `unchanged`, or `ambiguous`; duplicate live names are never written. Invalid files are reported as `invalid`. Creates report their new ids; creates and updates are read back for verification, including PUT's empty 204 response. Other files continue after a failure, and any failure exits 1. Inspect unconfirmed or unverifiable writes before rerunning; repeated names with an unverified write are held back in the same run. Equivalent files are no-ops on re-run.
+
+`--json` reports `ok`, `dryRun`, `writeKeySource`, and per-file `results` with file, alert, action, id, changes, test result, and error. Failed reports go to stderr. `--dry-run` is the diff preview and sends no writes or notifications.
+
+**`--test` sends real test notifications to the definition's channels.** Only use it when the user requests those notifications. It is off by default; when set, it calls `/api/v2/rules/test` before each create or update and reports `alertCount`. A failed test prevents the write; a lost response may already have sent a notification and is not retried. `--dry-run --test` still sends nothing. Deletion remains in the UI.
 
 ## References
 

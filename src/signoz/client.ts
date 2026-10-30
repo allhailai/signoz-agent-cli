@@ -41,8 +41,12 @@ export class SigNozClient {
     return this.requestJson("PATCH", path, body);
   }
 
+  async putJson(path: string, body: unknown): Promise<SigNozResponse> {
+    return this.requestJson("PUT", path, body);
+  }
+
   private async requestJson(
-    method: "GET" | "POST" | "PATCH",
+    method: "GET" | "POST" | "PATCH" | "PUT",
     path: string,
     body?: unknown,
     authenticated = true,

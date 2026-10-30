@@ -37,6 +37,10 @@ export class AlertRuleError extends Error {
       | "signoz_error"
       | "unexpected_response"
       | "invalid_patch"
+      | "invalid_definition"
+      | "invalid_directory"
+      | "ambiguous"
+      | "test_failed"
       | "update_unconfirmed"
       | "verification_failed",
     message: string,
@@ -56,6 +60,41 @@ export async function listAlertRules(
   query: AlertRulesPage["query"],
 ): Promise<AlertRulesPage> {
   const { rulesListApi } = await probeServerVersion(client);
+  const page = await fetchAlertRulesPage(client, query, rulesListApi);
+  return { ...page, rules: page.rules.map(summarizeRule) };
+}
+
+export async function listAllAlertRules(client: SigNozClient): Promise<{
+  rules: AlertRule[];
+  fullDefinitions: boolean;
+}> {
+  const { rulesListApi } = await probeServerVersion(client);
+  const rules: AlertRule[] = [];
+  let offset = 0;
+  for (;;) {
+    const page = await fetchAlertRulesPage(
+      client,
+      {
+        limit: rulesListApi === "v2" ? Number.MAX_SAFE_INTEGER : 200,
+        offset,
+      },
+      rulesListApi,
+    );
+    rules.push(...page.rules);
+    if (page.count === 0 && offset < page.total) {
+      throw unexpectedResponse("/api/v3/rules");
+    }
+    if (page.nextOffset === null) break;
+    offset = page.nextOffset;
+  }
+  return { rules, fullDefinitions: rulesListApi === "v2" };
+}
+
+async function fetchAlertRulesPage(
+  client: SigNozClient,
+  query: AlertRulesPage["query"],
+  rulesListApi: "v2" | "v3",
+): Promise<AlertRulesPage> {
   const endpoint =
     rulesListApi === "v2"
       ? "/api/v2/rules"
@@ -78,11 +117,10 @@ export async function listAlertRules(
     throw unexpectedResponse(endpoint);
   }
 
-  const rules = (
+  const rules =
     rulesListApi === "v2"
       ? rows.slice(query.offset, query.offset + query.limit)
-      : rows
-  ).map(summarizeRule);
+      : rows;
   const nextOffset = query.offset + rules.length;
 
   return {
@@ -156,6 +194,7 @@ export async function updateAlertRule(
   id: string,
   patch: Record<string, unknown>,
   dryRun: boolean,
+  writeClient: SigNozClient = client,
 ): Promise<AlertRuleUpdate> {
   const rule = await inspectAlertRule(client, id);
   // SigNoz replaces some object-valued envelopes during decoding. Fill in their
@@ -173,7 +212,7 @@ export async function updateAlertRule(
   const endpoint = ruleEndpoint(id);
   let response: SigNozResponse;
   try {
-    response = await client.patchJson(endpoint, payload);
+    response = await writeClient.patchJson(endpoint, payload);
   } catch {
     throw new AlertRuleError(
       "update_unconfirmed",
@@ -219,6 +258,20 @@ function requestedChanges(
       return requestedChanges(before as Record<string, unknown>, object, path);
     }
 
+    return sameValue(before, after, path)
+      ? []
+      : [{ path, before: before ?? null, after }];
+  });
+}
+
+export function definitionChanges(
+  current: Record<string, unknown>,
+  definition: Record<string, unknown>,
+): AlertRuleChange[] {
+  // Each supplied field is replaced in full by PUT, including empty objects.
+  return Object.entries(definition).flatMap(([key, after]) => {
+    const before = current[key];
+    const path = `/${key.replaceAll("~", "~0").replaceAll("/", "~1")}`;
     return sameValue(before, after, path)
       ? []
       : [{ path, before: before ?? null, after }];
@@ -339,7 +392,10 @@ function summarizeRule(rule: AlertRule): AlertRule {
   ) as AlertRule;
 }
 
-function responseData(response: SigNozResponse, endpoint: string): unknown {
+export function responseData(
+  response: SigNozResponse,
+  endpoint: string,
+): unknown {
   requireSuccess(response, endpoint);
   const body = asRecord(response.bodyJson);
   if (body?.status !== "success" || !Object.hasOwn(body, "data")) {
@@ -348,7 +404,10 @@ function responseData(response: SigNozResponse, endpoint: string): unknown {
   return body.data;
 }
 
-function requireSuccess(response: SigNozResponse, endpoint: string): void {
+export function requireSuccess(
+  response: SigNozResponse,
+  endpoint: string,
+): void {
   if (!response.ok) {
     throw new AlertRuleError(
       "signoz_error",
@@ -366,11 +425,11 @@ function unexpectedResponse(endpoint: string): AlertRuleError {
   );
 }
 
-function ruleEndpoint(id: string): string {
+export function ruleEndpoint(id: string): string {
   return `/api/v2/rules/${encodeURIComponent(id)}`;
 }
 
-function isAlertRule(value: unknown): value is AlertRule {
+export function isAlertRule(value: unknown): value is AlertRule {
   const rule = asRecord(value);
   return (
     typeof rule?.id === "string" &&
@@ -379,7 +438,7 @@ function isAlertRule(value: unknown): value is AlertRule {
   );
 }
 
-function asRecord(value: unknown): Record<string, unknown> | undefined {
+export function asRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : undefined;

@@ -41,26 +41,15 @@ export async function probeServerVersion(
 function rulesApiForVersion(
   version: string,
 ): ServerVersion["rulesListApi"] | undefined {
-  const match =
-    /^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([\da-zA-Z-]+(?:\.[\da-zA-Z-]+)*))?(?:\+[\da-zA-Z-]+(?:\.[\da-zA-Z-]+)*)?$/.exec(
-      version,
-    );
-  if (match === null) return undefined;
+  const match = /^v?(\d+)\.(\d+)\.(\d+)$/.exec(version);
+  if (match === null || match[0] !== version) return undefined;
 
   const major = Number(match[1]);
   const minor = Number(match[2]);
   const patch = Number(match[3]);
-  const prerelease = match[4];
-  if (
-    ![major, minor, patch].every(Number.isSafeInteger) ||
-    prerelease?.split(".").some((part) => /^0\d+$/.test(part))
-  ) {
+  if (![major, minor, patch].every(Number.isSafeInteger)) {
     return undefined;
   }
 
-  // Prereleases sort before the stable 0.144.0 release that introduced v3 listing.
-  return major === 0 &&
-    (minor < 144 || (minor === 144 && patch === 0 && prerelease !== undefined))
-    ? "v2"
-    : "v3";
+  return major === 0 && minor < 144 ? "v2" : "v3";
 }

@@ -3,6 +3,18 @@ export interface SigNozConfig {
   apiKey: string;
 }
 
+export type WriteKeySource = "SIGNOZ_WRITE_API_KEY" | "SIGNOZ_API_KEY";
+
+export function writeConfig(
+  config: SigNozConfig,
+  env: NodeJS.ProcessEnv = process.env,
+): { config: SigNozConfig; writeKeySource: WriteKeySource } {
+  const apiKey = env.SIGNOZ_WRITE_API_KEY?.trim();
+  return apiKey
+    ? { config: { ...config, apiKey }, writeKeySource: "SIGNOZ_WRITE_API_KEY" }
+    : { config, writeKeySource: "SIGNOZ_API_KEY" };
+}
+
 export type ConfigErrorCode = "missing_config" | "invalid_config";
 
 export class ConfigError extends Error {

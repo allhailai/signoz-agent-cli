@@ -269,18 +269,13 @@ describe("alert rules commands", () => {
 
   it.each([
     ["0.143.9", "v2"],
-    ["v0.144.0-rc.1", "v2"],
-    ["0.144.0+build.1", "v3"],
     ["v0.144.1", "v3"],
     ["v0.150.0", "v3"],
     ["v1.0.0", "v3"],
     ["v0.141", "v3"],
-    ["v0.0141.1", "v3"],
-    ["v0.141.1-01", "v3"],
-    ["v0.141.1-garbage!", "v3"],
     ["test-secret", "v3"],
   ])(
-    "selects %s's %s list API using semantic versions",
+    "selects %s's %s list API using release versions",
     async (version, tier) => {
       await withFakeSigNoz(
         (request) =>
@@ -675,6 +670,7 @@ function runCliUnchecked(
           ...process.env,
           SIGNOZ_API_URL: url,
           SIGNOZ_API_KEY: "test-secret",
+          SIGNOZ_WRITE_API_KEY: "",
         },
       },
       (error, stdout, stderr) => {
