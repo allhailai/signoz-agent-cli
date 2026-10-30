@@ -21,6 +21,27 @@ type CapturedRequest = {
   body: string;
 };
 
+type Reply = {
+  status?: number;
+  body?: unknown;
+  bodyText?: string;
+  contentType?: string;
+  disconnect?: boolean;
+};
+
+const versionReply = {
+  body: { version: "v0.141.1", ee: "Y", setupCompleted: true },
+};
+const authReply = {
+  status: 400,
+  body: { error: "invalid_input", message: "invalid input" },
+};
+
+function routes(auth: Reply, version: Reply = versionReply) {
+  return (request: CapturedRequest): Reply =>
+    request.url === "/api/v1/version" ? version : auth;
+}
+
 describe("doctor command", () => {
   it("fails clearly when required config is missing", async () => {
     const env = cliEnv();
@@ -36,39 +57,7 @@ describe("doctor command", () => {
   });
 
   it("prints compact success when SigNoz returns authenticated invalid input", async () => {
-    await withFakeSigNoz(
-      400,
-      { error: "invalid_input", message: "invalid input" },
-      async ({ requests, url }) => {
-        const result = await runCli(
-          ["doctor"],
-          cliEnv({
-            SIGNOZ_API_URL: url,
-            SIGNOZ_API_KEY: "test-secret",
-          }),
-        );
-
-        expect(result.exitCode).toBe(0);
-        expect(result.stdout).toBe(
-          "ok signoz reachable authenticated status=400\n",
-        );
-        expect(result.stderr).toBe("");
-        expect(result.stdout).not.toContain("test-secret");
-        expect(result.stderr).not.toContain("test-secret");
-        expect(requests).toEqual([
-          {
-            method: "POST",
-            url: "/api/v5/query_range",
-            apiKey: "test-secret",
-            body: "{}",
-          },
-        ]);
-      },
-    );
-  });
-
-  it("exits nonzero with a compact unauthenticated message on 401", async () => {
-    await withFakeSigNoz(401, { error: "unauthorized" }, async ({ url }) => {
+    await withFakeSigNoz(routes(authReply), async ({ requests, url }) => {
       const result = await runCli(
         ["doctor"],
         cliEnv({
@@ -77,17 +66,55 @@ describe("doctor command", () => {
         }),
       );
 
-      expect(result.exitCode).toBe(1);
-      expect(result.stdout).toBe("");
-      expect(result.stderr).toBe("error signoz unauthenticated status=401\n");
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toBe(
+        "ok signoz reachable authenticated status=400 version=v0.141.1 rulesListApi=v2 versionProbe=ok\n",
+      );
+      expect(result.stderr).toBe("");
+      expect(result.stdout).not.toContain("test-secret");
       expect(result.stderr).not.toContain("test-secret");
+      expect(requests).toEqual([
+        {
+          method: "GET",
+          url: "/api/v1/version",
+          apiKey: undefined,
+          body: "",
+        },
+        {
+          method: "POST",
+          url: "/api/v5/query_range",
+          apiKey: "test-secret",
+          body: "{}",
+        },
+      ]);
     });
+  });
+
+  it("exits nonzero with a compact unauthenticated message on 401", async () => {
+    await withFakeSigNoz(
+      routes({ status: 401, body: { error: "unauthorized" } }),
+      async ({ url }) => {
+        const result = await runCli(
+          ["doctor"],
+          cliEnv({
+            SIGNOZ_API_URL: url,
+            SIGNOZ_API_KEY: "test-secret",
+          }),
+        );
+
+        expect(result.exitCode).toBe(1);
+        expect(result.stdout).toBe("");
+        expect(result.stderr).toBe(
+          "error signoz unauthenticated status=401 version=v0.141.1 rulesListApi=v2 versionProbe=ok\n",
+        );
+        expect(result.stderr).not.toContain("test-secret");
+      },
+    );
   });
 
   it("prints structured JSON without exposing the API key", async () => {
     await withFakeSigNoz(
-      400,
-      { error: "invalid_input", message: "invalid input" },
+      routes(authReply, { body: { version: "v0.144.0" } }),
       async ({ url }) => {
         const result = await runCli(
           ["doctor", "--json"],
@@ -105,14 +132,125 @@ describe("doctor command", () => {
           apiUrl: url,
           endpoint: "/api/v5/query_range",
           httpStatus: 400,
+          version: "v0.144.0",
+          rulesListApi: "v3",
+          versionProbe: "ok",
         });
         expect(result.stdout).not.toContain("test-secret");
       },
     );
   });
+
+  it.each<[Reply, string]>([
+    [
+      {
+        status: 200,
+        contentType: "text/html",
+        bodyText: "<html>test-secret</html>",
+      },
+      "unexpected_response",
+    ],
+    [{ status: 404, body: { message: "test-secret" } }, "signoz_error"],
+    [{ body: { version: "test-secret" } }, "unexpected_response"],
+    [{ body: { version: 141 } }, "unexpected_response"],
+    [{ disconnect: true }, "unreachable"],
+  ])(
+    "reports an unknown version without failing authentication (%j)",
+    async (version, versionProbe) => {
+      await withFakeSigNoz(
+        routes(authReply, version),
+        async ({ url, requests }) => {
+          const env = cliEnv({
+            SIGNOZ_API_URL: url,
+            SIGNOZ_API_KEY: "test-secret",
+          });
+          const json = await runCli(["doctor", "--json"], env);
+          expect(json.exitCode).toBe(0);
+          expect(json.stderr).toBe("");
+          expect(json.stdout.trim().split("\n")).toHaveLength(1);
+          expect(JSON.parse(json.stdout)).toMatchObject({
+            ok: true,
+            status: "authenticated",
+            version: null,
+            rulesListApi: "v3",
+            versionProbe,
+          });
+          const text = await runCli(["doctor"], env);
+          expect(text.exitCode).toBe(0);
+          expect(text.stderr).toBe("");
+          expect(text.stdout).toBe(
+            `ok signoz reachable authenticated status=400 version=unknown rulesListApi=v3 versionProbe=${versionProbe}\n`,
+          );
+          expect(
+            requests.map(({ method, url, apiKey }) => [method, url, apiKey]),
+          ).toEqual([
+            ["GET", "/api/v1/version", undefined],
+            ["POST", "/api/v5/query_range", "test-secret"],
+            ["GET", "/api/v1/version", undefined],
+            ["POST", "/api/v5/query_range", "test-secret"],
+          ]);
+        },
+      );
+    },
+  );
+
+  it.each(["v0.141.1", "v0.144.0"])(
+    "includes %s's version and tier in both formats",
+    async (version) => {
+      await withFakeSigNoz(
+        routes(authReply, { body: { version } }),
+        async ({ url }) => {
+          const env = cliEnv({
+            SIGNOZ_API_URL: url,
+            SIGNOZ_API_KEY: "test-secret",
+          });
+          const rulesListApi = version === "v0.141.1" ? "v2" : "v3";
+          const json = await runCli(["doctor", "--json"], env);
+          expect(json.exitCode).toBe(0);
+          expect(JSON.parse(json.stdout)).toMatchObject({
+            version,
+            rulesListApi,
+            versionProbe: "ok",
+          });
+          const text = await runCli(["doctor"], env);
+          expect(text.exitCode).toBe(0);
+          expect(text.stdout).toContain(
+            `version=${version} rulesListApi=${rulesListApi} versionProbe=ok`,
+          );
+        },
+      );
+    },
+  );
+
+  it("retains version diagnostics when the authentication request cannot connect", async () => {
+    await withFakeSigNoz(routes({ disconnect: true }), async ({ url }) => {
+      const result = await runCli(
+        ["doctor", "--json"],
+        cliEnv({ SIGNOZ_API_URL: url, SIGNOZ_API_KEY: "test-secret" }),
+      );
+      expect(result.exitCode).toBe(1);
+      expect(JSON.parse(result.stdout)).toMatchObject({
+        ok: false,
+        code: "unreachable",
+        version: "v0.141.1",
+        rulesListApi: "v2",
+        versionProbe: "ok",
+      });
+    });
+  });
 });
 
 async function runCli(
+  args: string[],
+  env: NodeJS.ProcessEnv,
+): Promise<CliResult> {
+  const result = await runCliUnchecked(args, env);
+  expect(result.stdout).not.toContain("test-secret");
+  expect(result.stderr).not.toContain("test-secret");
+  return result;
+}
+
+async function runCliUnchecked(
   args: string[],
   env: NodeJS.ProcessEnv,
 ): Promise<CliResult> {
@@ -153,8 +291,7 @@ function cliEnv(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
 }
 
 async function withFakeSigNoz(
-  statusCode: number,
-  responseBody: unknown,
+  respond: (request: CapturedRequest) => Reply,
   testFn: (context: {
     requests: CapturedRequest[];
     url: string;
@@ -163,15 +300,23 @@ async function withFakeSigNoz(
   const requests: CapturedRequest[] = [];
   const server = createServer((request, response) => {
     readBody(request).then((body) => {
-      requests.push({
+      const captured = {
         method: request.method,
         url: request.url,
         apiKey: request.headers["signoz-api-key"],
         body,
-      });
+      };
+      requests.push(captured);
 
-      response.writeHead(statusCode, { "content-type": "application/json" });
-      response.end(JSON.stringify(responseBody));
+      const reply = respond(captured);
+      if (reply.disconnect === true) {
+        request.socket.destroy();
+        return;
+      }
+      response.writeHead(reply.status ?? 200, {
+        "content-type": reply.contentType ?? "application/json",
+      });
+      response.end(reply.bodyText ?? JSON.stringify(reply.body ?? {}));
     });
   });
 
