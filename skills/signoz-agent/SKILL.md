@@ -92,7 +92,7 @@ signoz-agent alerts apply --dir ./rules --dry-run --json
 signoz-agent alerts apply --dir ./rules --json
 ```
 
-An unchanged export is a no-op. Files are processed in filename order. Exact alert names determine `create`, `update`, `unchanged`, or `ambiguous`; duplicate live names are never written. Invalid files are reported as `invalid`. Creates report their new ids; creates and updates are read back for verification, including PUT's empty 204 response. Other files continue after a failure, and any failure exits 1. Inspect unconfirmed or unverifiable writes before rerunning; repeated names with an unverified write are held back in the same run. Equivalent files are no-ops on re-run.
+An unchanged export is a no-op. Files are processed in filename order. Exact alert names determine `create`, `update`, `unchanged`, or `ambiguous`; duplicate live names are never written. Invalid files, and a second file with the same alert name in one directory, are reported as `invalid` and never sent; keep one file per rule. Creates report their new ids; creates and updates are read back for verification, including PUT's empty 204 response. Other files continue after a failure, and any failure exits 1. Inspect unconfirmed or unverifiable writes before rerunning. Equivalent files are no-ops on re-run.
 
 `--json` reports `ok`, `dryRun`, `writeKeySource`, and per-file `results` with file, alert, action, id, changes, test result, and error. Failed reports go to stderr. `--dry-run` is the diff preview and sends no writes or notifications.
 

@@ -74,10 +74,9 @@ export async function listAlertRules(
   return { ...page, rules: page.rules.map(summarizeRule) };
 }
 
-export async function listAllAlertRules(client: SigNozClient): Promise<{
-  rules: AlertRule[];
-  fullDefinitions: boolean;
-}> {
+export async function listAllAlertRules(
+  client: SigNozClient,
+): Promise<AlertRule[]> {
   const { rulesListApi } = await probeServerVersion(client);
   const rules: AlertRule[] = [];
   let offset = 0;
@@ -97,7 +96,7 @@ export async function listAllAlertRules(client: SigNozClient): Promise<{
     if (page.nextOffset === null) break;
     offset = page.nextOffset;
   }
-  return { rules, fullDefinitions: rulesListApi === "v2" };
+  return rules;
 }
 
 async function fetchAlertRulesPage(

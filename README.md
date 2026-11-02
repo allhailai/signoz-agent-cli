@@ -153,8 +153,9 @@ An exported definition applies as `unchanged`. Edit its writable fields to updat
 - One matching name with equivalent fields: `unchanged`, with no write.
 - Multiple matching names: `ambiguous`, with no write. Resolve duplicate names before applying.
 - Invalid file: `invalid`, with no write.
+- A second file in the directory with the same `alert` name: `invalid`, with no write. Keep one file per rule.
 
-Creates and updates are read back and compared to the requested definition. PUT returns 204 without a body. A lost write reports `update_unconfirmed`; an accepted write with failed or mismatched readback reports `verification_failed`. Inspect before retrying either outcome. Remaining files continue, but another file for an unverified name is held back during that run. Successful earlier files are reflected in later name matches, including in dry runs. Re-running equivalent definitions performs no writes.
+Creates and updates are read back and compared to the requested definition. PUT returns 204 without a body. A lost write reports `update_unconfirmed`; an accepted write with failed or mismatched readback reports `verification_failed`. Inspect before retrying either outcome. Remaining files continue. Re-running equivalent definitions performs no writes.
 
 **`--test` sends real test notifications to the definition's channels.** It is off by default. When requested, each definition that needs a create or update is posted to `/api/v2/rules/test` before the write, and its `alertCount` is reported. A failed or malformed test response prevents that file's write. A lost test response may already have sent a notification; the CLI does not retry it. `--dry-run` suppresses both writes and test notifications even when combined with `--test`.
 

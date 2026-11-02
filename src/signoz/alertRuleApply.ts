@@ -66,8 +66,8 @@ export async function applyAlertRules(
   }
 
   // Cache the complete inventory once, including a failed load. Never create from a partial list.
-  let inventory: Promise<Array<{ rule: AlertRule; full: boolean }>> | undefined;
-  const uncertainNames = new Set<string>();
+  let inventory: Promise<AlertRule[]> | undefined;
+  const applied = new Set<string>();
   const results: ApplyFileResult[] = [];
   for (const file of files) {
     const result: ApplyFileResult = {
@@ -82,14 +82,16 @@ export async function applyAlertRules(
     results.push(result);
     try {
       const definition = await readDefinition(join(directory, file), result);
-      inventory ??= listAllAlertRules(client).then(
-        ({ rules, fullDefinitions }) =>
-          rules.map((rule) => ({ rule, full: fullDefinitions })),
-      );
+      if (applied.has(definition.alert)) {
+        throw new AlertRuleError(
+          "invalid_definition",
+          "An earlier file in this directory has the same alert name; keep one file per rule",
+        );
+      }
+      applied.add(definition.alert);
+      inventory ??= listAllAlertRules(client);
       const rules = await inventory;
-      const matches = rules.filter(
-        ({ rule }) => rule.alert === definition.alert,
-      );
+      const matches = rules.filter((rule) => rule.alert === definition.alert);
       if (matches.length > 1) {
         result.action = "ambiguous";
         throw new AlertRuleError(
@@ -99,50 +101,29 @@ export async function applyAlertRules(
       }
       const match = matches[0];
       result.action = match === undefined ? "create" : "update";
-      result.id = match?.rule.id || null;
-      if (uncertainNames.has(definition.alert)) {
-        throw new AlertRuleError(
-          "update_unconfirmed",
-          "An earlier write for this alert is unverified; inspect it before retrying",
-          { writeStatus: "unknown" },
-        );
-      }
+      result.id = match?.id ?? null;
       const current =
         match === undefined
           ? undefined
-          : match.full
-            ? match.rule
-            : await inspectAlertRule(client, match.rule.id);
+          : await inspectAlertRule(client, match.id);
       result.changes = definitionChanges(current ?? {}, definition);
       if (result.changes.length === 0) {
         result.action = "unchanged";
         continue;
       }
 
-      let saved: AlertRule;
-      if (options.dryRun) {
-        // Simulate earlier files so repeated names in a directory have the same plan as a real run.
-        saved = { ...definition, id: result.id ?? "" };
+      if (options.dryRun) continue;
+      if (options.test)
+        result.test = await testDefinition(writeClient, definition);
+      if (match === undefined) {
+        const created = await createDefinition(writeClient, definition);
+        result.id = created.id;
       } else {
-        if (options.test)
-          result.test = await testDefinition(writeClient, definition);
-        if (match === undefined) {
-          const created = await createDefinition(writeClient, definition);
-          result.id = created.id;
-        } else {
-          await replaceDefinition(writeClient, match.rule.id, definition);
-        }
-        saved = await verifyDefinition(client, result.id!, definition);
+        await replaceDefinition(writeClient, match.id, definition);
       }
-      if (match === undefined) rules.push({ rule: saved, full: true });
-      else {
-        match.rule = saved;
-        match.full = true;
-      }
+      await verifyDefinition(client, result.id!, definition);
     } catch (error) {
       result.error = applyError(error);
-      if (result.alert !== null && result.error.writeStatus !== undefined)
-        uncertainNames.add(result.alert);
     }
   }
   return {
@@ -267,7 +248,7 @@ async function verifyDefinition(
   client: SigNozClient,
   id: string,
   definition: Definition,
-): Promise<AlertRule> {
+): Promise<void> {
   const endpoint = ruleEndpoint(id);
   let rule: AlertRule;
   try {
@@ -286,7 +267,6 @@ async function verifyDefinition(
       { endpoint, writeStatus: "accepted" },
     );
   }
-  return rule;
 }
 
 function applyError(error: unknown): ApplyError {

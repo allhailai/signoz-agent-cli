@@ -207,6 +207,8 @@ describe("alerts apply", () => {
                 expect(requests.map(({ url }) => url)).toEqual([
                   "/signoz/api/v1/version",
                   "/signoz/api/v2/rules",
+                  `/signoz/api/v2/rules/${secondId}`,
+                  `/signoz/api/v2/rules/${firstId}`,
                 ]);
               } else {
                 expect(requests.slice(1, 5).map(({ url }) => url)).toEqual(
@@ -501,12 +503,11 @@ describe("alerts apply", () => {
   );
 
   it.each(["lost", "malformed", "verification-failed"])(
-    "handles a %s create without repeating the name in the same run",
+    "handles a %s create and continues other files",
     async (mode) => {
       await withFiles(
         {
           "a-create.json": definition("Uncertain"),
-          "b-repeat.json": definition("Uncertain"),
           "c-good.json": definition("Good"),
         },
         async (dir) => {
@@ -527,10 +528,7 @@ describe("alerts apply", () => {
                   ? "verification_failed"
                   : "update_unconfirmed",
               );
-              expect(report(result).results[1].error.code).toBe(
-                "update_unconfirmed",
-              );
-              expect(report(result).results[2]).toMatchObject({
+              expect(report(result).results[1]).toMatchObject({
                 action: "create",
                 error: null,
               });
@@ -657,7 +655,7 @@ describe("alerts apply", () => {
   );
 
   it.each([false, true])(
-    "handles repeated desired names in stable order (dryRun=%s)",
+    "reports a second file with the same alert name as invalid (dryRun=%s)",
     async (dryRun) => {
       await withFiles(
         { "b-same.json": definition("New"), "a-new.json": definition("New") },
@@ -671,12 +669,15 @@ describe("alerts apply", () => {
               "--json",
               ...(dryRun ? ["--dry-run"] : []),
             ]);
-            expect(result.exitCode).toBe(0);
-            expect(
-              report(result).results.map(
-                (row: { action: string }) => row.action,
-              ),
-            ).toEqual(["create", "unchanged"]);
+            expect(result.exitCode).toBe(1);
+            expect(report(result).results).toMatchObject([
+              { file: "a-new.json", action: "create", error: null },
+              {
+                file: "b-same.json",
+                action: "invalid",
+                error: { code: "invalid_definition" },
+              },
+            ]);
             expect(
               requests.filter(({ method }) => method === "POST"),
             ).toHaveLength(dryRun ? 0 : 1);
