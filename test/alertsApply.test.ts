@@ -912,7 +912,7 @@ async function withServer(
       });
     }
     if (request.method === "POST" && path === "/signoz/api/v2/rules/test")
-      return { body: { alertCount: 2, message: "notification sent" } };
+      return success({ alertCount: 2, message: "notification sent" });
     if (request.method === "POST" && path === "/signoz/api/v2/rules") {
       const id = `01900000-0000-7000-8000-${String(++created).padStart(12, "0")}`;
       const rule = { ...request.body, id, state: "inactive" } as Rule;

@@ -205,7 +205,7 @@ async function testDefinition(
       { endpoint },
     );
   }
-  const count = asRecord(response.bodyJson)?.alertCount;
+  const count = asRecord(asRecord(response.bodyJson)?.data)?.alertCount;
   if (
     !response.ok ||
     typeof count !== "number" ||
