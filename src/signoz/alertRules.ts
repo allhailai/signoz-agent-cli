@@ -8,6 +8,16 @@ export type AlertRule = Record<string, unknown> & {
   alert: string;
 };
 
+// Fields SigNoz sets on every rule. Never part of a patch or a definition file.
+export const serverOwnedFields = [
+  "id",
+  "state",
+  "createdAt",
+  "createdBy",
+  "updatedAt",
+  "updatedBy",
+];
+
 export type AlertRulesPage = {
   ok: true;
   count: number;
@@ -169,16 +179,7 @@ export function parseAlertRulePatch(text: string): Record<string, unknown> {
   }
 
   // Inspection envelopes and server-owned fields are not update payloads.
-  const readOnlyFields = [
-    "id",
-    "state",
-    "createAt",
-    "createBy",
-    "updateAt",
-    "updateBy",
-    "ok",
-    "rule",
-  ];
+  const readOnlyFields = [...serverOwnedFields, "ok", "rule"];
   if (readOnlyFields.some((field) => Object.hasOwn(record, field))) {
     throw new AlertRuleError(
       "invalid_patch",

@@ -12,6 +12,7 @@ import {
   requireSuccess,
   responseData,
   ruleEndpoint,
+  serverOwnedFields,
   type AlertRule,
   type AlertRuleChange,
 } from "./alertRules.js";
@@ -167,20 +168,12 @@ async function readDefinition(
   }
   const definition = asRecord(value);
   if (typeof definition?.alert === "string") result.alert = definition.alert;
-  const serverFields = [
-    "id",
-    "state",
-    "createdAt",
-    "createdBy",
-    "updatedAt",
-    "updatedBy",
-  ];
   if (
     definition === undefined ||
     definition.schemaVersion !== "v2alpha1" ||
     typeof definition.alert !== "string" ||
     definition.alert.trim() === "" ||
-    serverFields.some((field) => Object.hasOwn(definition, field))
+    serverOwnedFields.some((field) => Object.hasOwn(definition, field))
   ) {
     throw new AlertRuleError(
       "invalid_definition",

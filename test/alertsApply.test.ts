@@ -768,6 +768,27 @@ describe("alerts update credentials", () => {
     },
   );
 
+  it("rejects server-owned fields before any request", async () => {
+    await withServer("v0.141.1", [liveRule()], async ({ url, requests }) => {
+      const result = await runCli(
+        url,
+        [
+          "alerts",
+          "update",
+          firstId,
+          "--patch-file",
+          "-",
+          "--dry-run",
+          "--json",
+        ],
+        '{"createdAt":"2026-01-01T00:00:00Z"}',
+      );
+      expect(result.exitCode).toBe(1);
+      expect(report(result).code).toBe("invalid_patch");
+      expect(requests).toEqual([]);
+    });
+  });
+
   it("names the key variable on failure without leaking either key", async () => {
     await withServer(
       "v0.141.1",
