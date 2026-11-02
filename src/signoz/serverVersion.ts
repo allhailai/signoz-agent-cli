@@ -42,7 +42,7 @@ function rulesApiForVersion(
   version: string,
 ): ServerVersion["rulesListApi"] | undefined {
   const match = /^v?(\d+)\.(\d+)\.(\d+)$/.exec(version);
-  if (match === null || match[0] !== version) return undefined;
+  if (match === null) return undefined;
 
   const major = Number(match[1]);
   const minor = Number(match[2]);
