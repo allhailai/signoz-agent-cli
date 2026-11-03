@@ -2,11 +2,12 @@ import { readFile } from "node:fs/promises";
 
 import { Command, InvalidArgumentError } from "commander";
 
-import { ConfigError, loadConfig } from "../config.js";
+import { ConfigError, loadConfig, writeConfig } from "../config.js";
 import {
   formatAlertRulesListText,
   formatAlertRuleText,
   formatAlertRuleUpdateText,
+  formatAlertRulesApplyText,
 } from "../output/alerts.js";
 import {
   AlertRuleError,
@@ -16,15 +17,23 @@ import {
   updateAlertRule,
 } from "../signoz/alertRules.js";
 import { SigNozClient, SigNozNetworkError } from "../signoz/client.js";
+import { applyAlertRules } from "../signoz/alertRuleApply.js";
 
 type OutputOptions = { json?: boolean };
 type ListOptions = OutputOptions & { limit: number; offset: number };
 type UpdateOptions = OutputOptions & { patchFile: string; dryRun?: boolean };
+type ApplyOptions = OutputOptions & {
+  dir: string;
+  dryRun?: boolean;
+  test?: boolean;
+};
 
 export function registerAlertsCommand(program: Command): void {
   const alerts = program
     .command("alerts")
-    .description("List, inspect, and update configured SigNoz alert rules.");
+    .description(
+      "List, inspect, update, and apply configured SigNoz alert rules.",
+    );
 
   alerts
     .command("list")
@@ -73,7 +82,9 @@ export function registerAlertsCommand(program: Command): void {
     .option("--json", "Print structured JSON output.")
     .action(async (id: string, options: UpdateOptions) => {
       await runCommand("update", options, async () => {
-        const client = new SigNozClient(loadConfig());
+        const config = loadConfig();
+        const client = new SigNozClient(config);
+        const write = writeConfig(config);
         const patch = parseAlertRulePatch(
           await readPatchFile(options.patchFile),
         );
@@ -82,8 +93,45 @@ export function registerAlertsCommand(program: Command): void {
           id,
           patch,
           options.dryRun === true,
+          new SigNozClient(write.config),
         );
-        return { result, text: formatAlertRuleUpdateText(result) };
+        return {
+          result: { ...result, writeKeySource: write.writeKeySource },
+          text: `${formatAlertRuleUpdateText(result)}Writes use ${write.writeKeySource}.\n`,
+        };
+      });
+    });
+
+  alerts
+    .command("apply")
+    .description(
+      "Apply full v2alpha1 rule definitions from a directory, matched by alert name.",
+    )
+    .requiredOption("--dir <dir>", "Directory containing rule JSON files.")
+    .option(
+      "--dry-run",
+      "Preview changes without writes or test notifications.",
+    )
+    .option(
+      "--test",
+      "Send a real test notification before each create or update.",
+    )
+    .option("--json", "Print structured JSON output.")
+    .action(async (options: ApplyOptions) => {
+      await runCommand("apply", options, async () => {
+        const config = loadConfig();
+        const write = writeConfig(config);
+        const result = await applyAlertRules(
+          new SigNozClient(config),
+          new SigNozClient(write.config),
+          options.dir,
+          {
+            dryRun: options.dryRun === true,
+            test: options.test === true,
+            writeKeySource: write.writeKeySource,
+          },
+        );
+        return { result, text: formatAlertRulesApplyText(result) };
       });
     });
 }
@@ -91,22 +139,46 @@ export function registerAlertsCommand(program: Command): void {
 async function runCommand(
   command: string,
   options: OutputOptions,
-  run: () => Promise<{ result: unknown; text: string }>,
+  run: () => Promise<{ result: { ok: boolean }; text: string }>,
 ): Promise<void> {
   try {
     const { result, text } = await run();
-    process.stdout.write(
-      options.json === true ? `${JSON.stringify(result)}\n` : text,
+    const stream = result.ok ? process.stdout : process.stderr;
+    stream.write(
+      redactKeys(options.json === true ? `${JSON.stringify(result)}\n` : text),
     );
+    if (!result.ok) process.exitCode = 1;
   } catch (error) {
-    const failure = formatFailure(command, error);
+    const failure = {
+      ...formatFailure(command, error),
+      ...(command === "apply" || command === "update"
+        ? {
+            writeKeySource: process.env.SIGNOZ_WRITE_API_KEY?.trim()
+              ? "SIGNOZ_WRITE_API_KEY"
+              : "SIGNOZ_API_KEY",
+          }
+        : {}),
+    };
     process.stderr.write(
-      options.json === true
-        ? `${JSON.stringify(failure)}\n`
-        : `error ${failure.message}\n`,
+      redactKeys(
+        options.json === true
+          ? `${JSON.stringify(failure)}\n`
+          : `error ${failure.message}${"writeKeySource" in failure ? ` writes=${failure.writeKeySource}` : ""}\n`,
+      ),
     );
     process.exitCode = 1;
   }
+}
+
+function redactKeys(text: string): string {
+  for (const value of [
+    process.env.SIGNOZ_API_KEY,
+    process.env.SIGNOZ_WRITE_API_KEY,
+  ]) {
+    const key = value?.trim();
+    if (key) text = text.replaceAll(key, "[REDACTED]");
+  }
+  return text;
 }
 
 function formatFailure(

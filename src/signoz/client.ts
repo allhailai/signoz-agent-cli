@@ -33,14 +33,23 @@ export class SigNozClient {
     return this.requestJson("GET", path);
   }
 
+  async getPublicJson(path: string): Promise<SigNozResponse> {
+    return this.requestJson("GET", path, undefined, false);
+  }
+
   async patchJson(path: string, body: unknown): Promise<SigNozResponse> {
     return this.requestJson("PATCH", path, body);
   }
 
+  async putJson(path: string, body: unknown): Promise<SigNozResponse> {
+    return this.requestJson("PUT", path, body);
+  }
+
   private async requestJson(
-    method: "GET" | "POST" | "PATCH",
+    method: "GET" | "POST" | "PATCH" | "PUT",
     path: string,
     body?: unknown,
+    authenticated = true,
   ): Promise<SigNozResponse> {
     const url = this.buildUrl(path);
     let response: Response;
@@ -50,7 +59,7 @@ export class SigNozClient {
         method,
         headers: {
           "content-type": "application/json",
-          "SIGNOZ-API-KEY": this.config.apiKey,
+          ...(authenticated ? { "SIGNOZ-API-KEY": this.config.apiKey } : {}),
         },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       });
